@@ -89,6 +89,8 @@
   .send{background:var(--user);color:var(--user-ink);border:1px solid var(--user);border-radius:10px;
     padding:10px 16px;font:inherit;cursor:pointer}
   .send:disabled{opacity:.5}
+  .send.stop{background:var(--err);border-color:var(--err)}
+  .stopped{font-size:12px;color:var(--muted);margin-top:6px}
   @media (max-width:720px){
     .sidebar{position:absolute;z-index:5;height:100%;margin-left:-260px}
     .sidebar.open{margin-left:0}
@@ -124,7 +126,7 @@
 const $=id=>document.getElementById(id);
 const log=$('log'), input=$('input'), send=$('send'), dot=$('dot'), statusText=$('statusText'),
   modelSel=$('modelSel'), convList=$('convList'), sidebar=$('sidebar');
-let currentConv=null, busy=false;
+let currentConv=null, busy=false, currentAbort=null;
 
 const TOOL_ICON={web_search:'🔎',news_search:'📰',read_url:'📄',research:'🔬',analyze_site:'🛰️',
   compare_sites:'⚖️',wikipedia:'📚',calculate:'🧮',burp_parse_report:'🐛',burp_feed:'🐛',burp_scan:'🐛',
@@ -172,13 +174,21 @@ function addChip(steps,name,args,done,preview){
   return chip;
 }
 
+// While a turn is running the Send button turns into a red Stop button
+// (Esc also stops). Stopping aborts the fetch, which closes the streaming
+// connection to the LLM server so the model actually stops generating.
+function setBusy(b){ busy=b; send.textContent=b?'Stop':'Send'; send.classList.toggle('stop',b); }
+function stopMessage(){ if(currentAbort) currentAbort.abort(); }
+
 async function sendMessage(){
   const text=input.value.trim(); if(!text||busy) return;
-  busy=true;send.disabled=true;input.value='';input.style.height='auto';
+  setBusy(true); currentAbort=new AbortController();
+  input.value='';input.style.height='auto';
   userMsg(text); const {steps,body}=botMsg(); scrollDown();
   let chip=null, buf='', streaming=false, reasonEl=null;
   try{
     const resp=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      signal:currentAbort.signal,
       body:JSON.stringify({conversation_id:currentConv,message:text,model:modelSel.value||''})});
     const reader=resp.body.getReader(); const dec=new TextDecoder(); let sbuf='';
     while(true){const {value,done}=await reader.read(); if(done)break;
@@ -202,9 +212,19 @@ async function sendMessage(){
       }
     }
     if(streaming && !body.querySelector('h1,h2,h3,p,ul,ol,pre')) body.innerHTML=md(buf);
-  }catch(e){ body.innerHTML='<span class="err">Connection error: '+esc(String(e))+'</span>'; }
-  busy=false;send.disabled=false;input.focus();
-  loadConvs();   // conversation is saved once the stream ends; refresh + highlight it
+  }catch(e){
+    if(e.name==='AbortError'){   // user hit Stop — keep whatever streamed so far
+      const sp=body.querySelector('.thinking'); if(sp) sp.remove();
+      if(streaming && !body.querySelector('h1,h2,h3,p,ul,ol,pre')) body.innerHTML=md(buf);
+      const n=document.createElement('div'); n.className='stopped'; n.textContent='⏹ stopped';
+      body.appendChild(n);
+    } else {
+      body.innerHTML='<span class="err">Connection error: '+esc(String(e))+'</span>';
+    }
+  }finally{
+    setBusy(false); currentAbort=null; input.focus();
+    loadConvs();   // the (partial) conversation is saved server-side; refresh the list
+  }
 }
 
 async function loadConvs(){
@@ -254,8 +274,11 @@ async function loadModels(){
 $('newChat').onclick=()=>{currentConv=null;log.innerHTML='';loadConvs();input.focus();
   if(window.innerWidth<=720)sidebar.classList.remove('open');};
 $('burger').onclick=()=>sidebar.classList.toggle('open');
-send.onclick=sendMessage;
-input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}});
+send.onclick=()=>{ busy ? stopMessage() : sendMessage(); };
+input.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}
+  else if(e.key==='Escape'&&busy){e.preventDefault();stopMessage();}
+});
 input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,160)+'px';});
 loadModels(); loadConvs(); setInterval(loadModels,20000); input.focus();
 </script>

@@ -13,6 +13,7 @@ Binds to 127.0.0.1 only -- it is a local single-user tool, not a public server.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 import webbrowser
@@ -122,6 +123,7 @@ async def chat(request: Request) -> EventSourceResponse:
 
         turn: dict = {"role": "assistant", "content": "", "steps": []}
         answer_text = ""
+        stopped = False
         try:
             async for event in run_stream(conv["messages"], model=model):
                 etype = event["type"]
@@ -129,19 +131,39 @@ async def chat(request: Request) -> EventSourceResponse:
                     turn["steps"].append({"name": event["name"], "args": event.get("args", {})})
                 elif etype == "tool_result" and turn["steps"]:
                     turn["steps"][-1]["preview"] = event.get("preview", "")
+                # Accumulate the streamed answer so a turn stopped mid-generation
+                # still persists what was produced. `answer` is the final,
+                # authoritative text; `answer_reset` discards a tool-call preamble.
+                elif etype == "answer_delta":
+                    answer_text += event.get("text", "")
+                elif etype == "answer_reset":
+                    answer_text = ""
                 elif etype == "answer":
                     answer_text = event["text"]
                 yield {"data": json.dumps(event)}
+        except (asyncio.CancelledError, GeneratorExit):
+            # The browser hit Stop and disconnected. Persist what we have (below,
+            # in finally) and re-raise so the server can tear the request down.
+            # Re-raising ends the async-for, which closes run_stream's HTTP
+            # connection to the LLM, stopping generation.
+            stopped = True
+            raise
         except Exception as exc:  # a crash must not hang the browser's stream
             yield {"data": json.dumps({"type": "error", "text": f"{type(exc).__name__}: {exc}"})}
             answer_text = answer_text or f"(error: {exc})"
+        finally:
+            # Persist on every exit path — normal finish, error, or stop — so a
+            # turn the user interrupted (and their message) is never lost, even
+            # if they stopped it during the model's reasoning phase before any
+            # answer token. No yielding here: the generator may be closing.
+            turn["content"] = answer_text or ("(stopped)" if stopped else "")
+            if turn["content"] or turn["steps"]:
+                conv["turns"].append(turn)
+            try:
+                store.save(conv)
+            except OSError:
+                pass
 
-        turn["content"] = answer_text
-        conv["turns"].append(turn)
-        try:
-            store.save(conv)
-        except OSError as exc:
-            yield {"data": json.dumps({"type": "note", "text": f"could not save chat: {exc}"})}
         yield {"data": json.dumps({"type": "done"})}
 
     return EventSourceResponse(events())
