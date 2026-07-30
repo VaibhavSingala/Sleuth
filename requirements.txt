@@ -30,3 +30,5 @@ playwright>=1.40      # headless-browser render for JS-only sites
 starlette>=0.40       # ASGI app + routing
 uvicorn>=0.30         # ASGI server
 sse-starlette>=2.0    # Server-Sent Events streaming to the browser
+
+requests
