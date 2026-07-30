@@ -1,0 +1,63 @@
+# Sleuth + ZAP, containerised.
+#
+#   docker compose up -d --build
+#   open http://127.0.0.1:8765
+#
+# The LLM stays on your HOST (LM Studio's server or `ollama serve`). The
+# container reaches it via host.docker.internal, so no LLM config is needed
+# beyond having it running on the host.
+
+services:
+  sleuth:
+    build: .
+    image: sleuth:latest
+    ports:
+      - "127.0.0.1:8765:8765"      # webchat, host-localhost only
+    env_file:
+      - .env                        # your settings (gates, keys, LLM_*)
+    environment:
+      SLEUTH_IN_DOCKER: "1"         # makes provider detection use host.docker.internal
+      ZAP_API_URL: "http://zap:8090"  # reach the ZAP container by service name
+      # Route target traffic through ZAP's proxy (service name, not 127.0.0.1!)
+      # so zap_feed works and ZAP passively scans everything the tools fetch.
+      ZAP_PROXY: "http://zap:8090"
+      ZAP_PROXY_VERIFY: "false"     # ZAP re-signs TLS with its own CA
+      # A container's localhost is NOT the host. To use Burp running on the
+      # host, set this to http://host.docker.internal:8080; empty = no proxy.
+      BURP_PROXY: ""
+      # Burp Pro's REST API on the host (needs Burp PROFESSIONAL). Points at the
+      # host, not the container. Harmless if you don't run Burp.
+      BURP_API_URL: "http://host.docker.internal:1337"
+      # Self-extension: the .env's SLEUTH_CODE_ROOT is a host path that does not
+      # exist inside the container, so point the code_* tools at the container's
+      # source (/app). With ./websearch bind-mounted below, self-edits land on
+      # the host source. These override whatever .env sets.
+      SLEUTH_CODE_ROOT: "/app"
+      SLEUTH_ALLOW_EXEC: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach host services (LLM, Burp)
+    volumes:
+      - ./conversations:/app/conversations     # saved chats persist on the host
+      - ./.cache:/app/.cache
+      - ./skills:/app/skills                   # authored skills persist on the host
+      - ./.backups:/app/.backups               # code_write snapshots persist
+      - ./websearch:/app/websearch             # model's self-edits land on host source
+    depends_on:
+      - zap
+    restart: unless-stopped
+
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    # Daemon mode: API on 8090, key disabled, allow calls from the compose net.
+    command: >
+      zap.sh -daemon -host 0.0.0.0 -port 8090
+      -config api.disablekey=true
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+    environment:
+      ZAP_PORT: "8090"              # the image's built-in healthcheck reads this
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # so ZAP can scan host-local targets
+    ports:
+      - "127.0.0.1:8090:8090"       # optional: reach ZAP's API/UI from the host
+    restart: unless-stopped
