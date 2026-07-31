@@ -1,26 +1,92 @@
-import requests
+from __future__ import annotations
 
-def brute_force_login(url: str, username: str, password: str) -> dict:
-    """Attempts a login on the specified URL using provided credentials and returns success/failure."""
-    # Assuming a standard POST request to a /login endpoint. Adjust 'login' if necessary.
-    login_endpoint = f"{url}/login" 
-    payload = {
-        "username": username,
-        "password": password
-    }
+from typing import Any
+from urllib.parse import urljoin
+
+from websearch import skill_runtime as rt
+
+
+def brute_force_login(
+    url: str,
+    username: str,
+    password: str,
+    login_path: str = "/login",
+    username_field: str = "username",
+    password_field: str = "password",
+    success_indicators: str = "",
+    failure_indicators: str = "",
+) -> dict[str, Any]:
+    """
+    Attempt a single login against a web form and analyse the response.
+
+    Only use on systems you own or are explicitly authorised to test.
+
+    Args:
+        url: Base URL of the target (e.g. https://example.com).
+        username: Username to try.
+        password: Password to try.
+        login_path: Login endpoint path (default /login).
+        username_field: Form field name for the username.
+        password_field: Form field name for the password.
+        success_indicators: Comma-separated strings that indicate success in the body.
+        failure_indicators: Comma-separated strings that indicate failure in the body.
+
+    Returns:
+        Dict with status (success, failure, ambiguous), HTTP details, and clues.
+    """
     try:
-        response = requests.post(login_endpoint, data=payload)
-        # Common ways to detect successful login: status code 200/302, or checking for a success message in the body
-        if response.status_code == 200 and "Welcome" in response.text:
-            return {"status": "Success", "message": f"Login successful for {username}."}
-        elif response.status_code in [301, 302]: # Redirect often means success
-             return {"status": "Success (Redirect)", "message": f"Login successful for {username}, redirected."}
-        else:
-            # Check for common failure messages
-            if "Invalid credentials" in response.text or "Failed to log in" in response.text:
-                return {"status": "Failure", "message": f"Login failed for {username}: Invalid credentials."}
-            else:
-                 return {"status": "Ambiguous", "message": f"Login attempt returned status code {response.status_code}. Check content."}
+        base = rt.normalize_url(url)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
 
-    except requests.exceptions.RequestException as e:
-        return {"status": "Error", "message": f"An error occurred during the request: {e}"}
+    endpoint = urljoin(base + "/", login_path.lstrip("/"))
+    payload = {username_field: username, password_field: password}
+
+    success_kw = [s.strip() for s in success_indicators.split(",") if s.strip()] or [
+        "welcome", "dashboard", "logout", "sign out", "my account",
+    ]
+    failure_kw = [s.strip() for s in failure_indicators.split(",") if s.strip()] or [
+        "invalid", "incorrect", "failed", "wrong password", "bad credentials",
+        "authentication failed", "login failed",
+    ]
+
+    try:
+        resp = rt.http_request("POST", endpoint, data=payload, timeout=15.0, allow_redirects=True)
+        body_lower = resp.text.lower()
+        final_url = str(resp.url)
+
+        # Redirect away from login page often means success
+        if resp.history and "login" not in final_url.lower():
+            status = "success"
+            reason = f"Redirected to {final_url} after login POST."
+        elif any(kw.lower() in body_lower for kw in success_kw) and not any(
+            kw.lower() in body_lower for kw in failure_kw
+        ):
+            status = "success"
+            reason = "Success indicator found in response body."
+        elif any(kw.lower() in body_lower for kw in failure_kw):
+            status = "failure"
+            reason = "Failure indicator found in response body."
+        elif resp.status_code in (401, 403):
+            status = "failure"
+            reason = f"HTTP {resp.status_code} returned."
+        elif "set-cookie" in {k.lower() for k in resp.headers} and resp.status_code in (200, 302):
+            status = "ambiguous"
+            reason = "Session cookie set but no clear success/failure text — verify manually."
+        else:
+            status = "ambiguous"
+            reason = f"HTTP {resp.status_code}; no clear success/failure indicators."
+
+        return {
+            "ok": True,
+            "status": status,
+            "reason": reason,
+            "endpoint": endpoint,
+            "username": username,
+            "http_status": resp.status_code,
+            "final_url": final_url,
+            "response_length": len(resp.text),
+            "cookies_set": bool(resp.cookies),
+        }
+    except Exception as exc:
+        return {"ok": False, "endpoint": endpoint, "error": str(exc)}

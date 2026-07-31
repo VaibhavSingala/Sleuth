@@ -1,88 +1,91 @@
-import requests
-from typing import Optional
+from __future__ import annotations
 
-def directory_bruteforce(url: str, wordlist_path: str, timeout: int = 5) -> dict:
+from typing import Any
+
+from websearch import skill_runtime as rt
+
+
+def directory_bruteforce(
+    url: str,
+    wordlist_path: str = "",
+    max_words: int = 100,
+    timeout: float = 5.0,
+    status_codes: str = "200,301,302,403",
+) -> dict[str, Any]:
     """
-    Performs a dictionary-based brute-force scan on the specified URL.
+    Brute-force discover hidden directories and files on a web server.
 
-    It reads words from the provided wordlist file and checks each path appended to the base URL.
-    A successful response (HTTP status code 200) is considered a found directory/file.
+    Uses a built-in common-path wordlist when no file is provided. Only test
+    targets you own or are authorised to scan.
 
     Args:
-        url: The base URL to scan (e.g., "http://example.com").
-        wordlist_path: The file path to the dictionary wordlist.
-        timeout: Request timeout in seconds.
+        url: Base URL to scan (e.g. https://example.com).
+        wordlist_path: Optional path to a wordlist file (one path per line).
+        max_words: Maximum paths to test (default 100, cap 2000).
+        timeout: Per-request timeout in seconds.
+        status_codes: Comma-separated HTTP codes to treat as findings.
 
     Returns:
-        A dictionary containing 'found_paths' (list of successful paths) 
-        and 'total_tested' (integer count).
+        Dict with found_paths, redirects, and scan statistics.
     """
     try:
-        with open(wordlist_path, 'r') as f:
-            words = [line.strip() for line in f if line.strip()]
-    except FileNotFoundError:
-        return {
-            "error": f"Wordlist not found at path: {wordlist_path}",
-            "found_paths": [],
-            "total_tested": 0
-        }
+        base = rt.normalize_url(url)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
 
-    base_url = url.rstrip('/')
-    found_paths = []
-    total_tested = 0
+    max_words = max(1, min(int(max_words), 2000))
+    accept_codes = {int(c.strip()) for c in status_codes.split(",") if c.strip().isdigit()}
 
-    print(f"[*] Starting directory brute-force on: {base_url}")
-    print(f"[*] Using wordlist from: {wordlist_path}")
-    print("-" * 40)
+    try:
+        words = rt.load_wordlist(wordlist_path, max_words=max_words)
+    except FileNotFoundError as exc:
+        return {"ok": False, "error": str(exc), "found_paths": [], "total_tested": 0}
+
+    found: list[dict[str, Any]] = []
+    redirects: list[dict[str, Any]] = []
+    errors = 0
+    baseline_len: int | None = None
+
+    # Grab baseline 404 length to filter soft-404 false positives
+    try:
+        baseline = rt.http_request("GET", f"{base}/__sleuth_nonexistent_{hash(base) % 99999}__", timeout=timeout)
+        baseline_len = len(baseline.text)
+    except Exception:
+        pass
 
     for word in words:
-        total_tested += 1
-        target_url = f"{base_url}/{word}"
+        target = f"{base}/{word.lstrip('/')}"
         try:
-            # Use HEAD request as it's faster than GET, only fetching headers
-            response = requests.head(target_url, timeout=timeout, allow_redirects=True)
-            
-            # Check for success status code (200 OK is standard, but 3xx redirects are also often valid findings)
-            if response.status_code == 200:
-                found_paths.append(target_url)
-                print(f"[+] FOUND: {target_url} (Status: {response.status_code})")
-            # Optionally, you could check for other codes like 301/302 if you want to capture redirects as "found" too
-            elif response.status_code >= 300 and response.status_code < 400:
-                 print(f"[~] REDIRECT: {target_url} (Status: {response.status_code})")
+            resp = rt.http_request("HEAD", target, timeout=timeout, allow_redirects=False)
+            code = resp.status_code
 
-        except requests.exceptions.RequestException as e:
-            # Handle connection errors, timeouts, DNS issues, etc.
-            # print(f"[-] Error checking {word}: {e}") # Uncomment for verbose output
-            pass
+            # Fall back to GET if HEAD is not allowed
+            if code in (405, 501):
+                resp = rt.http_request("GET", target, timeout=timeout, allow_redirects=False)
+                code = resp.status_code
 
-    print("-" * 40)
+            if code in accept_codes:
+                body_len = len(resp.text) if code != 301 else 0
+                # Skip soft-404s: same size as baseline error page
+                if baseline_len and code == 200 and abs(body_len - baseline_len) < 50:
+                    continue
+                entry = {"url": target, "status_code": code, "content_length": body_len}
+                if 300 <= code < 400:
+                    entry["location"] = resp.headers.get("location", "")
+                    redirects.append(entry)
+                else:
+                    found.append(entry)
+        except Exception:
+            errors += 1
+
     return {
-        "found_paths": found_paths,
-        "total_tested": total_tested
+        "ok": True,
+        "base_url": base,
+        "total_tested": len(words),
+        "found_count": len(found),
+        "redirect_count": len(redirects),
+        "error_count": errors,
+        "found_paths": found,
+        "redirects": redirects,
+        "wordlist_source": wordlist_path or "built-in",
     }
-
-if __name__ == '__main__':
-    # --- Example Usage ---
-    TARGET_URL = "http://xpanle.xyz/"  # Change this to your target site
-    WORDLIST_FILE = "common.txt"     # Ensure you have a wordlist named common.txt in the project root
-
-    print(f"--- Running Directory Brute-Force Example ---")
-    results = directory_bruteforce(TARGET_URL, WORDLIST_FILE)
-    
-    if "error" in results:
-        print(f"\n[!!!] ERROR DURING SCAN:")
-        print(results["error"])
-    else:
-        print("\n=========================================")
-        print("          SCAN COMPLETE SUMMARY")
-        print("=========================================")
-        print(f"Total Paths Tested: {results['total_tested']}")
-        print(f"Paths Found (200 OK): {len(results['found_paths'])}")
-        if results['found_paths']:
-            print("\n--- List of Found Paths ---")
-            for path in results['found_paths'][:10]: # Print top 10 for brevity
-                print(f"  -> {path}")
-            if len(results['found_paths']) > 10:
-                 print(f"  ... and {len(results['found_paths']) - 10} more.")
-        else:
-             print("No paths returned a 200 OK status code.")

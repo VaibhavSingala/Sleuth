@@ -1,84 +1,87 @@
-import requests
-from requests.exceptions import RequestException
+from __future__ import annotations
 
-def check_ssl_config(url: str):
+from typing import Any
+from urllib.parse import urlparse
+
+from websearch import skill_runtime as rt
+
+
+def check_ssl_config(url: str) -> dict[str, Any]:
     """
-    Checks various SSL/TLS configuration aspects for a given URL, including 
-    HTTPS usage, supported TLS versions, cipher suites, HSTS presence, and certificate details.
+    Analyse SSL/TLS configuration for a URL: certificate, protocol, cipher,
+    HSTS header, and expiry.
+
+    Args:
+        url: HTTPS URL or hostname (e.g. https://example.com).
+
+    Returns:
+        Dict with TLS details, security assessment, and recommendations.
     """
-    print(f"--- Starting SSL Configuration Check for: {url} ---")
-    
     try:
-        # Use HEAD request to be lightweight, but GET is safer if headers are tricky
-        response = requests.get(url, timeout=10)
-        response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+        target = rt.normalize_url(url)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
 
-        print("\n[✅] Connection Successful!")
-        print(f"  Status Code: {response.status_code}")
-        print(f"  Protocol Used: {response.url.split('//')[-1].split('/')[0]} (Inferred from request)")
+    parsed = urlparse(target)
+    hostname = parsed.hostname
+    if not hostname:
+        return {"ok": False, "error": f"Could not parse hostname from {target}"}
 
-        # 1. Check for HTTPS usage (already mostly done, but good to confirm)
-        if response.url.startswith("https://"):
-            print("  [✅] Protocol: HTTPS is in use.")
-        else:
-            print("  [⚠️] Protocol: HTTP is in use. Consider enforcing HTTPS.")
+    port = parsed.port or (443 if parsed.scheme == "https" else 443)
+    result: dict[str, Any] = {"ok": True, "url": target, "hostname": hostname, "issues": [], "recommendations": []}
 
-        # 2. Check HSTS (Strict-Transport-Security) header
-        hsts = response.headers.get('strict-transport-security')
-        if hsts:
-            print(f"  [✅] HSTS Present: {hsts}")
-        else:
-            print("  [❌] HSTS Missing: No Strict-Transport-Security header found.")
+    # TLS handshake inspection
+    tls = rt.inspect_ssl(hostname, port=port)
+    result["tls"] = tls
 
-        # 3. Check Certificate Details
-        cert = response.connection.get_extra_info('peercert')
-        if cert:
-            import ssl
-            from cryptography import x509
-            from cryptography.hazmat.backends import default_backend
-            
-            try:
-                cert_obj = x509.load_pem_x509_certificate(cert.encode('utf-8'), default_backend())
-                
-                # Issuer and Subject
-                issuer = cert_obj.issuer.rfc4514_string()
-                subject = cert_obj.subject.rfc4514_string()
-                print("\n[📜] Certificate Details:")
-                print(f"  Subject (Common Name): {cert_obj.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value}")
-                print(f"  Issuer: {issuer}")
-                print(f"  Valid From: {cert_obj.not_valid_before.strftime('%Y-%m-%d %H:%M:%S')}")
-                print(f"  Valid Until: {cert_obj.not_valid_after.strftime('%Y-%m-%d %H:%M:%S')}")
+    if not tls.get("ok"):
+        result["issues"].append(f"TLS handshake failed: {tls.get('error')}")
+        result["recommendations"].append("Ensure the server supports HTTPS on port 443.")
+    else:
+        proto = tls.get("protocol", "")
+        if proto in ("TLSv1", "TLSv1.1", "SSLv3"):
+            result["issues"].append(f"Weak protocol negotiated: {proto}")
+            result["recommendations"].append("Disable TLS 1.0/1.1 and SSLv3; require TLS 1.2+.")
+        if tls.get("expired"):
+            result["issues"].append("Certificate has expired.")
+        elif tls.get("days_until_expiry") is not None and tls["days_until_expiry"] < 30:
+            result["issues"].append(f"Certificate expires in {tls['days_until_expiry']} days.")
 
-            except Exception as e:
-                print(f"\n[⚠️] Certificate Parsing Error: Could not fully parse certificate details. ({e})")
-        else:
-            print("\n[❌] Certificate Details: No peer certificate information available.")
+    # HTTP security headers (HSTS etc.)
+    try:
+        resp = rt.http_request("GET", target, timeout=12.0)
+        headers = {k.lower(): v for k, v in resp.headers.items()}
+        result["http_status"] = resp.status_code
+        result["final_url"] = str(resp.url)
 
+        if not str(resp.url).startswith("https://"):
+            result["issues"].append("Final URL is not HTTPS — traffic may be downgraded.")
+            result["recommendations"].append("Enforce HTTPS redirects and HSTS.")
 
-        # 4. Check TLS Versions and Cipher Suites (Requires deeper inspection, but we can get a good summary)
-        ssl_socket = response.connection.sock
-        if ssl_socket:
-            # Get supported protocols/versions
-            supported_protocols = [str(proto) for proto in ssl_socket.cipher()]
-            print("\n[⚙️] TLS Configuration:")
-            print(f"  Cipher Suite Used: {ssl_socket.cipher()}")
-            print(f"  Supported Protocols (Negotiated): {', '.join(supported_protocols)}")
+        hsts = headers.get("strict-transport-security")
+        result["hsts"] = hsts
+        if not hsts:
+            result["issues"].append("HSTS header missing.")
+            result["recommendations"].append("Add Strict-Transport-Security with max-age >= 31536000.")
 
-            # A quick check for modern protocols
-            if 'TLSv1.3' in supported_protocols or 'TLSv1.2' in supported_protocols:
-                print("  [✅] Modern TLS Supported: At least TLS 1.2 is active.")
-            else:
-                 print("  [⚠️] Modern TLS Warning: Only older protocols (e.g., SSLv3, TLSv1.0) might be active.")
+        for hdr in ("content-security-policy", "x-content-type-options", "x-frame-options"):
+            result.setdefault("security_headers", {})[hdr] = headers.get(hdr)
 
-    except requests.exceptions.HTTPError as e:
-        print(f"\n[❌] HTTP Error Occurred: {e}")
-        print(f"  Response URL: {response.url}")
-    except RequestException as e:
-        print(f"\n[❌] Connection/Request Error: Could not reach the site.")
-        print(f"  Error Details: {e}")
+        missing = [h for h in ("content-security-policy", "x-content-type-options", "x-frame-options") if h not in headers]
+        if missing:
+            result["issues"].append(f"Missing headers: {', '.join(missing)}")
+    except Exception as exc:
+        result["issues"].append(f"HTTP header check failed: {exc}")
 
-# Example usage (will be called by the tool runner)
-if __name__ == '__main__':
-    check_ssl_config("https://www.google.com") # Test with a known good site
-    # check_ssl_config("http://xpanle.xyz/")     # Test with the user's target site
-
+    result["grade"] = (
+        "A" if not result["issues"]
+        else "B" if len(result["issues"]) <= 1
+        else "C" if len(result["issues"]) <= 3
+        else "D"
+    )
+    result["summary"] = (
+        f"SSL grade {result['grade']}: {len(result['issues'])} issue(s) found."
+        if result["issues"]
+        else f"SSL grade A: TLS {tls.get('protocol', 'unknown')}, certificate valid."
+    )
+    return result

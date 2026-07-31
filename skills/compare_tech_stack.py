@@ -1,25 +1,28 @@
-from typing import Dict, Any
-# Assuming 'compare_sites' is available in the global scope (ws)
+from __future__ import annotations
 
-def compare_tech_stack(url_a: str, url_b: str) -> Dict[str, Any]:
+from typing import Any
+
+from websearch import skill_runtime as rt
+
+
+def compare_tech_stack(url_a: str, url_b: str, detail: str = "standard") -> dict[str, Any]:
     """
-    Compares the technology stack, infrastructure, and keywords of two websites.
+    Compare two websites: technology stack, infrastructure, security headers,
+    and keywords. Wraps the built-in compare_sites analyzer.
 
     Args:
-        url_a: The first website URL to compare.
-        url_b: The second website URL to compare against.
+        url_a: First site URL.
+        url_b: Second site URL.
+        detail: Report depth — summary, standard, or full.
 
     Returns:
-        A dictionary containing the comparison report from the compare_sites tool.
+        Dict with ok flag and markdown comparison report.
     """
+    detail = detail if detail in ("summary", "standard", "full") else "standard"
     try:
-        # Using 'standard' detail for a comprehensive yet concise report
-        report = compare_sites(url_a=url_a, url_b=url_b, detail="standard")
-        return report
-    except Exception as e:
-        return {"error": f"An error occurred while comparing sites: {e}"}
-
-# Example usage (optional, but good for testing):
-# if __name__ == '__main__':
-#     result = compare_tech_stack("http://google.com", "https://www.microsoft.com")
-#     print(result)
+        a = rt.normalize_url(url_a)
+        b = rt.normalize_url(url_b)
+        report = rt.compare_sites_report(a, b, detail=detail)
+        return {"ok": True, "url_a": a, "url_b": b, "detail": detail, "report": report}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "url_a": url_a, "url_b": url_b}

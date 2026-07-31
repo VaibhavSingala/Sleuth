@@ -1,55 +1,109 @@
-def check_common_vectors(url: str) -> dict:
+from __future__ import annotations
+
+from typing import Any
+from urllib.parse import quote, urlencode, urlparse
+
+from websearch import skill_runtime as rt
+
+
+def check_common_vectors(url: str, param: str = "id") -> dict[str, Any]:
     """
-    Tests a given URL against several common web application vulnerabilities, 
-    including SQL Injection (basic), Cross-Site Scripting (XSS - basic reflected), 
-    and Directory Traversal.
+    Quick passive checks for common web vulnerabilities on a target URL.
+
+    Tests SQL injection error leakage, reflected XSS, directory traversal, and
+    missing security headers. Heuristic only — confirm findings manually.
 
     Args:
-        url: The base URL to test (e.g., "http://example.com/").
+        url: Base URL to test (e.g. https://example.com/page).
+        param: Primary query parameter name for injection tests.
 
     Returns:
-        A dictionary containing the results of each test.
+        Dict with per-vector status, severity, and details.
     """
-    import requests
-
-    results = {}
-    base_url = url.rstrip('/')
-    
-    # --- 1. Basic SQL Injection Test (on homepage) ---
-    sqli_test_url = f"{base_url}?id=1' OR 1=1 --"
     try:
-        response = requests.get(sqli_test_url, timeout=10)
-        # Simple heuristic: Check for common SQL keywords in the response body
-        if "sqlmap" in response.text or "' OR 1=1" in response.text or "admin" in response.text.lower():
-            results['SQL Injection'] = {'status': 'VULNERABLE', 'details': f"Found indicators on {sqli_test_url}"}
-        else:
-            results['SQL Injection'] = {'status': 'SAFE (Heuristic)', 'details': f"No immediate SQLi indicators found on {sqli_test_url}"}
-    except requests.exceptions.RequestException as e:
-        results['SQL Injection'] = {'status': 'ERROR', 'details': str(e)}
+        base = rt.normalize_url(url)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
 
-    # --- 2. Basic Reflected XSS Test (on homepage) ---
-    xss_payload = "<script>alert('XSS_TEST')</script>"
-    xss_test_url = f"{base_url}?q={requests.utils.quote(xss_payload)}"
+    results: dict[str, Any] = {}
+    parsed = urlparse(base)
+
+    # --- SQL injection (error-based) ---
+    sqli_payloads = [
+        f"{param}=1'",
+        f"{param}=1' OR '1'='1",
+        f"{param}=1; SELECT 1--",
+    ]
+    sqli_hits: list[str] = []
+    for payload in sqli_payloads:
+        test_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}?{payload}"
+        try:
+            resp = rt.http_request("GET", test_url, timeout=12.0)
+            errors = rt.detect_sql_errors(resp.text)
+            if errors:
+                sqli_hits.append(f"{test_url} → {errors[0]}")
+        except Exception:
+            pass
+    results["sql_injection"] = {
+        "status": "likely" if sqli_hits else "not_detected",
+        "severity": "high" if sqli_hits else "info",
+        "details": sqli_hits or "No SQL error messages detected.",
+    }
+
+    # --- Reflected XSS ---
+    xss = rt.test_xss_reflection(base, param=param)
+    results["reflected_xss"] = {
+        "status": "likely" if xss.get("vulnerable") else "not_detected",
+        "severity": "high" if xss.get("vulnerable") else "info",
+        "details": xss.get("findings", [])[:3] or xss.get("summary"),
+    }
+
+    # --- Directory traversal ---
+    traversal_paths = [
+        f"{base}/../../../../etc/passwd",
+        f"{base}/..%2f..%2f..%2fetc/passwd",
+        f"{base}/?{param}=../../../etc/passwd",
+    ]
+    traversal_hits: list[str] = []
+    for turl in traversal_paths:
+        try:
+            resp = rt.http_request("GET", turl, timeout=12.0)
+            if "root:" in resp.text and (":0:0:" in resp.text or "/bin/" in resp.text):
+                traversal_hits.append(turl)
+        except Exception:
+            pass
+    results["directory_traversal"] = {
+        "status": "likely" if traversal_hits else "not_detected",
+        "severity": "critical" if traversal_hits else "info",
+        "details": traversal_hits or "No /etc/passwd content retrieved.",
+    }
+
+    # --- Security headers ---
     try:
-        response = requests.get(xss_test_url, timeout=10)
-        # Simple heuristic: Check if the payload string is present in the response body
-        if xss_payload in response.text:
-            results['Reflected XSS'] = {'status': 'VULNERABLE', 'details': f"Payload found reflected on {xss_test_url}"}
-        else:
-            results['Reflected XSS'] = {'status': 'SAFE (Heuristic)', 'details': f"Payload not directly reflected on {xss_test_url}"}
-    except requests.exceptions.RequestException as e:
-        results['Reflected XSS'] = {'status': 'ERROR', 'details': str(e)}
+        resp = rt.http_request("GET", base, timeout=12.0)
+        headers = {k.lower(): v for k, v in resp.headers.items()}
+        missing = []
+        for h in ("strict-transport-security", "content-security-policy", "x-frame-options", "x-content-type-options"):
+            if h not in headers:
+                missing.append(h)
+        results["security_headers"] = {
+            "status": "weak" if missing else "good",
+            "severity": "medium" if len(missing) >= 3 else ("low" if missing else "info"),
+            "present": {h: headers[h] for h in headers if h.startswith(("strict-", "content-", "x-", "referrer-", "permissions-"))},
+            "missing": missing,
+        }
+    except Exception as exc:
+        results["security_headers"] = {"status": "error", "details": str(exc)}
 
-    # --- 3. Directory Traversal Test (on homepage) ---
-    dt_test_url = f"{base_url}/../../../../etc/passwd" # Common Linux path
-    try:
-        response = requests.get(dt_test_url, timeout=10)
-        # Simple heuristic: Check if the content looks like /etc/passwd (contains 'root:')
-        if "root:" in response.text and "bin/bash" in response.text:
-            results['Directory Traversal'] = {'status': 'VULNERABLE', 'details': f"Successfully accessed system file on {dt_test_url}"}
-        else:
-            results['Directory Traversal'] = {'status': 'SAFE (Heuristic)', 'details': f"Did not retrieve standard /etc/passwd content from {dt_test_url}"}
-    except requests.exceptions.RequestException as e:
-        results['Directory Traversal'] = {'status': 'ERROR', 'details': str(e)}
-
-    return results
+    likely = [k for k, v in results.items() if v.get("status") in ("likely", "weak", "critical")]
+    return {
+        "ok": True,
+        "url": base,
+        "vectors_tested": len(results),
+        "findings": results,
+        "summary": (
+            f"Potential issues in: {', '.join(likely)}. Verify manually."
+            if likely
+            else "No obvious issues detected with heuristic checks."
+        ),
+    }

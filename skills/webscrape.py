@@ -1,16 +1,32 @@
+from __future__ import annotations
+
 from typing import Optional
 
-# Assuming 'read_url' is available in the scope (which it is)
-def webscrape(url: str, max_chars: Optional[int] = None) -> str:
+from websearch import config, skill_runtime as rt
+
+
+def webscrape(url: str, max_chars: Optional[int] = None) -> dict:
     """
-    Scrapes the content of a given URL by fetching and returning its main text.
+    Fetch a URL and return its main text content using the project's read_url
+    extractor (strips nav, ads, and boilerplate).
 
     Args:
-        url: The full URL of the webpage to scrape (e.g., "http://example.com").
-        max_chars: The maximum number of characters to return from the page. 
-                   If None, the default limit of read_url will be used.
+        url: Full URL to fetch (e.g. https://example.com/page).
+        max_chars: Maximum characters to return (defaults to project limit).
 
     Returns:
-        A string containing the main text content of the scraped webpage.
+        Dict with url, content, char_count, and any error message.
     """
-    return read_url(url=url, max_chars=max_chars)
+    try:
+        target = rt.normalize_url(url)
+        content = rt.read_page(target, max_chars=max_chars)
+        limit = max_chars if max_chars is not None else config.MAX_PAGE_CHARS
+        return {
+            "ok": True,
+            "url": target,
+            "content": content,
+            "char_count": len(content),
+            "truncated": len(content) >= limit,
+        }
+    except Exception as exc:
+        return {"ok": False, "url": url, "error": str(exc), "content": ""}
