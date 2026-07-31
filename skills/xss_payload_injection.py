@@ -1,20 +1,29 @@
-import requests
+from __future__ import annotations
 
-def xss_payload_injection(url: str, payload: str) -> dict:
-    """Specifically injects a given XSS payload into the root path and reports if it executes or is reflected."""
-    # Injecting into the query parameter 'q' as a common test vector. Adjust if needed.
-    test_url = f"{url}?q={payload}"
-    try:
-        response = requests.get(test_url)
-        content = response.text
-        
-        # Check for reflection (the payload string appearing in the HTML source)
-        if payload in content:
-            return {"status": "Reflected", "message": f"Payload '{payload}' was found reflected in the page source."}
+from typing import Any
 
-        # A more advanced check would be to see if an alert() call is present, 
-        # but for simplicity, we'll assume reflection means success unless proven otherwise.
-        return {"status": "Not Reflected", "message": f"Payload '{payload}' was not found reflected in the page source."}
+from websearch import skill_runtime as rt
 
-    except requests.exceptions.RequestException as e:
-        return {"status": "Error", "message": f"An error occurred during the request: {e}"}
+
+def xss_payload_injection(
+    url: str,
+    payload: str = "",
+    param: str = "",
+    method: str = "GET",
+) -> dict[str, Any]:
+    """
+    Test a URL for reflected XSS by injecting payloads into query parameters.
+
+    Tries multiple common parameter names when ``param`` is omitted, and uses
+    built-in probe payloads when ``payload`` is omitted.
+
+    Args:
+        url: Target base URL (e.g. https://example.com/search).
+        payload: XSS payload to inject. Uses safe default probes if empty.
+        param: Specific query parameter to test. Tests common names if empty.
+        method: HTTP method — GET or POST.
+
+    Returns:
+        Dict with findings per parameter, reflection context, and severity.
+    """
+    return rt.test_xss_reflection(url=url, payload=payload, param=param, method=method)

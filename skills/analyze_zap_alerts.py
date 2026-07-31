@@ -1,80 +1,96 @@
-import json
-from typing import List, Dict, Any
+from __future__ import annotations
 
-def analyze_zap_alerts(url: str) -> str:
+from typing import Any
+
+from websearch import skill_runtime as rt
+
+_RISK_ORDER = {"High": 0, "Medium": 1, "Low": 2, "Informational": 3, "Info": 4}
+
+
+def analyze_zap_alerts(url: str) -> dict[str, Any]:
     """
-    Reads raw alerts from OWASP ZAP for a given URL and provides a structured, 
-    human-readable executive summary report.
+    Fetch OWASP ZAP alerts for a URL and return a structured executive summary.
+
+    Requires ZAP running in daemon mode (ZAP_API_URL / ZAP_API_KEY in .env).
+    Passive alerts appear after proxying traffic; active scan alerts need zap_scan.
 
     Args:
-        url (str): The base URL to check alerts against (e.g., "http://example.com").
+        url: Base URL to check (e.g. https://example.com).
 
     Returns:
-        str: A formatted string containing the alert summary.
+        Dict with alert counts by severity, top findings, and markdown report.
     """
     try:
-        # 1. Call the existing ZAP tool
-        alerts_data = zap_alerts(url=url)
-        
-        if not alerts_data or isinstance(alerts_data, str) and "No alerts found" in alerts_data:
-            return f"✅ **ZAP Alert Analysis for {url}:**\n\n🎉 No security alerts were found by OWASP ZAP! The site appears clean based on this scan."
+        base = rt.normalize_url(url)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
 
-        # Assuming zap_alerts returns a string that is JSON formatted, or the raw list/dict structure.
-        if isinstance(alerts_data, str):
-            try:
-                alerts = json.loads(alerts_data)
-            except json.JSONDecodeError:
-                # If it's just a nicely formatted string, we might need to parse it differently, 
-                # but for robustness, let's assume the tool returns JSON structure if possible.
-                return f"⚠️ **ZAP Alert Analysis for {url}:**\n\nCould not perfectly parse raw output from ZAP. Here is the raw summary:\n---\n{alerts_data}"
-        else:
-            alerts = alerts_data
+    zap = rt.fetch_zap_alerts(base)
+    if not zap.get("ok"):
+        return {"ok": False, "url": base, "error": zap.get("error"), "report": ""}
 
-        # 2. Process and categorize alerts
-        categorized_alerts: Dict[str, List[Dict[str, Any]]] = {
-            "Critical": [],
-            "High": [],
-            "Medium": [],
-            "Low": []
+    alerts = zap.get("alerts", [])
+    if not alerts:
+        return {
+            "ok": True,
+            "url": base,
+            "total": 0,
+            "by_risk": {},
+            "top_findings": [],
+            "report": f"No ZAP alerts for {base}. Proxy traffic through ZAP or run an active scan first.",
         }
-        total_alerts = len(alerts)
 
-        for alert in alerts:
-            severity = alert.get("risk", "Info") # ZAP often uses 'risk' field for severity mapping
-            if severity not in categorized_alerts:
-                # Handle cases where risk might be something else (e.g., "Informational")
-                categorized_alerts[f"{severity}"] = []
+    by_risk: dict[str, list[dict[str, Any]]] = {}
+    for alert in alerts:
+        risk = (alert.get("risk") or alert.get("riskdesc", "Informational")).split()[0]
+        risk = risk.capitalize()
+        if risk == "Info":
+            risk = "Informational"
+        entry = {
+            "name": alert.get("alert") or alert.get("name", "Unknown"),
+            "url": alert.get("url", ""),
+            "param": alert.get("param", ""),
+            "confidence": alert.get("confidence", ""),
+            "description": (alert.get("desc") or alert.get("description", ""))[:200],
+            "solution": (alert.get("solution", ""))[:200],
+            "cwe": alert.get("cweid", ""),
+        }
+        by_risk.setdefault(risk, []).append(entry)
 
-            alert_info = {
-                "Name": alert.get("name", "N/A"),
-                "Confidence": alert.get("confidence", "N/A"),
-                "Description": alert.get("desc", "No description provided.")[:80] + "..."
-            }
-            categorized_alerts[severity].append(alert_info)
+    counts = {risk: len(items) for risk, items in by_risk.items()}
+    sorted_risks = sorted(by_risk.items(), key=lambda kv: _RISK_ORDER.get(kv[0], 9))
 
-        # 3. Generate Report
-        report = f"🛡️ **ZAP Security Alert Analysis Report for {url}** 🛡️\n"
-        report += f"===================================================\n"
-        report += f"📊 **Total Alerts Found:** {total_alerts}\n\n"
+    lines = [
+        f"# ZAP Alert Analysis — {base}",
+        "",
+        f"**Total alerts:** {len(alerts)}",
+        "**By risk:** " + ", ".join(f"{r}: {counts[r]}" for r in sorted(counts, key=lambda x: _RISK_ORDER.get(x, 9))),
+        "",
+    ]
 
-        for severity, alerts_list in categorized_alerts.items():
-            count = len(alerts_list)
-            report += f"🚨 **{severity} Severity ({count}):**\n"
-            if count > 0:
-                for i, alert in enumerate(alerts_list):
-                    report += f"  - [{i+1}] {alert['Name']} (Confidence: {alert['Confidence']})\n"
-                    report += f"    > *Summary:* {alert['Description']}\n"
-            else:
-                report += "  - None found.\n"
-            report += "\n"
+    top_findings: list[dict[str, Any]] = []
+    for risk, items in sorted_risks:
+        lines.append(f"## {risk} ({len(items)})")
+        for item in items[:10]:
+            loc = item["url"]
+            if item["param"]:
+                loc += f" [{item['param']}]"
+            lines.append(f"- **{item['name']}** — `{loc}`")
+            if item["solution"]:
+                lines.append(f"  - Fix: {item['solution']}")
+            top_findings.append({**item, "risk": risk})
+        if len(items) > 10:
+            lines.append(f"- …and {len(items) - 10} more")
+        lines.append("")
 
-        # 4. Add quick remediation advice
-        if total_alerts > 0:
-            report += "💡 **Quick Remediation Advice:**\n"
-            report += "   * **Critical/High:** Prioritize fixing these immediately. Ensure proper input validation and output encoding.\n"
-            report += "   * **Medium/Low:** Address these in the next sprint to improve overall security posture."
+    lines.append("---")
+    lines.append("Confirm each finding manually — scanners report false positives.")
 
-        return report
-
-    except Exception as e:
-        return f"❌ **Error during ZAP Alert Analysis for {url}:** An unexpected error occurred. Details: {e}"
+    return {
+        "ok": True,
+        "url": base,
+        "total": len(alerts),
+        "by_risk": counts,
+        "top_findings": top_findings[:20],
+        "report": "\n".join(lines),
+    }

@@ -1,30 +1,37 @@
-from typing import Optional
-# Assuming xss_payload_injection is available in the global scope (ws)
+from __future__ import annotations
 
-def check_xss_reflection(url: str, payload: str) -> dict:
+from typing import Any
+
+from websearch import skill_runtime as rt
+
+
+def check_xss_reflection(
+    url: str,
+    payload: str = "",
+    param: str = "",
+) -> dict[str, Any]:
     """
-    Tests a given URL for reflected Cross-Site Scripting (XSS) by injecting 
-    a specified payload into the root path and reporting execution/reflection status.
+    Test a URL for reflected Cross-Site Scripting (XSS).
+
+    Injects the given payload (or built-in safe probes) and reports whether
+    it is reflected in the response, with context and severity.
 
     Args:
-        url: The target website URL (e.g., "http://example.com").
-        payload: The XSS payload to inject (e.g., "<script>alert('XSS')</script>").
+        url: Target URL to test.
+        payload: XSS payload. Uses built-in safe probes if omitted.
+        param: Query parameter to inject into. Tests common names if omitted.
 
     Returns:
-        A dictionary containing the results from the xss_payload_injection tool call.
+        Dict with vulnerability status, findings, and remediation hints.
     """
-    try:
-        # Call the existing tool with the provided arguments
-        result = ws.xss_payload_injection(url=url, payload=payload)
+    result = rt.test_xss_reflection(url=url, payload=payload, param=param)
+    if not result.get("ok"):
         return result
-    except Exception as e:
-        return {"error": str(e), "message": f"An error occurred while calling xss_payload_injection."}
 
-# Example usage (optional, but good for testing):
-if __name__ == '__main__':
-    test_url = "http://xpanle.xyz/"
-    test_payload = "<script>alert('XSS')</script>"
-    print(f"--- Testing XSS Reflection on {test_url} with payload: {test_payload} ---")
-    result = check_xss_reflection(test_url, test_payload)
-    import json
-    print(json.dumps(result, indent=4))
+    result["recommendation"] = (
+        "Reflected XSS likely — encode all user input in HTML context and set "
+        "Content-Security-Policy. Verify manually; automated probes produce false positives."
+        if result.get("vulnerable")
+        else "No reflection detected with tested payloads. Try other parameters or POST body fields."
+    )
+    return result
