@@ -39,6 +39,7 @@ def new_conversation() -> dict:
         "title": "",
         "created": _now(),
         "updated": _now(),
+        "scope": {"target_url": ""},
         "messages": [{"role": "system", "content": system_prompt(_today())}],
         "turns": [],
     }
@@ -49,9 +50,11 @@ def load(conv_id: str) -> dict | None:
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    data.setdefault("scope", {"target_url": ""})
+    return data
 
 
 def load_or_create(conv_id: str | None) -> dict:
@@ -85,6 +88,22 @@ def rename(conv_id: str, title: str) -> bool:
     if conv is None:
         return False
     conv["title"] = title.strip()[:120] or conv.get("title", "")
+    save(conv)
+    return True
+
+
+def set_scope(conv_id: str, target_url: str) -> bool:
+    """Pin a target URL on a conversation for security/recon sessions."""
+    conv = load(conv_id)
+    if conv is None:
+        return False
+    conv.setdefault("scope", {})["target_url"] = target_url.strip()[:500]
+    today = _today()
+    scoped = system_prompt(today, conv.get("scope"))
+    if conv["messages"] and conv["messages"][0].get("role") == "system":
+        conv["messages"][0]["content"] = scoped
+    else:
+        conv["messages"].insert(0, {"role": "system", "content": scoped})
     save(conv)
     return True
 

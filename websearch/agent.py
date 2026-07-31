@@ -31,6 +31,7 @@ from .burp.reports import parse_report as burp_parse_report
 from .burp.scan import scan_status as burp_scan_status
 from .burp.scan import scan_url as burp_scan
 from .burp.seed import feed_recon as burp_feed
+from .composites import compare_and_summarize, quick_recon
 from .core import news_search, read_url, research, web_search
 from .extras import calculate, wikipedia_lookup
 from .wapiti.scan import scan_url as wapiti_scan
@@ -349,6 +350,49 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "quick_recon",
+            "description": (
+                "One-shot passive recon of a URL: site profile, SSL check, and "
+                "common vulnerability probes in a single call. Prefer this over "
+                "chaining analyze_site + security skills yourself."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Target URL or hostname."},
+                    "detail": {
+                        "type": "string",
+                        "enum": ["summary", "standard", "full"],
+                        "description": "Profile depth for the site analysis section.",
+                    },
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_and_summarize",
+            "description": (
+                "Compare two websites and return an executive summary plus the "
+                "full side-by-side report. Prefer this over calling compare_sites "
+                "and summarising yourself."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url_a": {"type": "string", "description": "First site."},
+                    "url_b": {"type": "string", "description": "Second site."},
+                    "detail": {"type": "string", "enum": ["summary", "standard", "full"]},
+                },
+                "required": ["url_a", "url_b"],
+            },
+        },
+    },
 ]
 
 HANDLERS = {
@@ -369,6 +413,8 @@ HANDLERS = {
     "zap_scan": zap_scan,
     "zap_scan_status": zap_scan_status,
     "wapiti_scan": wapiti_scan,
+    "quick_recon": quick_recon,
+    "compare_and_summarize": compare_and_summarize,
 }
 
 # The built-in tool names are reserved so an authored skill can't shadow one.
@@ -420,6 +466,11 @@ SYSTEM_PROMPT = (
     "facts (definitions, people, places) — do not compute or recall these yourself.\n"
     "- If the user writes `/analyze <url>`, call `analyze_site` on that URL "
     "and summarise the report.\n"
+    "- If the user writes `/scan <url>`, call `quick_recon` on that URL.\n"
+    "- If a session target scope is set, use it when the user says "
+    "'the target', 'this site', or 'scan it' without naming a URL.\n"
+    "- Prefer `quick_recon` over chaining multiple recon tools, and "
+    "`compare_and_summarize` over `compare_sites` when contrasting two sites.\n"
     "- Base your answer on what the tools returned, and cite sources as "
     "[1], [2] with their URLs at the end.\n"
     "- If the tools find nothing useful, say so plainly rather than guessing."
@@ -427,11 +478,19 @@ SYSTEM_PROMPT = (
 )
 
 
-def system_prompt(today: str) -> str:
+def system_prompt(today: str, scope: dict | None = None) -> str:
     """The system prompt for `today`, including the self-extension hint only
     when skills are enabled (so we never advertise tools we won't offer)."""
     hint = SKILLS_PROMPT if config.SKILLS_ENABLED else ""
-    return SYSTEM_PROMPT.format(today=today, skills=hint)
+    out = SYSTEM_PROMPT.format(today=today, skills=hint)
+    target = (scope or {}).get("target_url", "").strip()
+    if target:
+        out += (
+            f"\n\n**Session target scope:** `{target}`\n"
+            "When the user refers to 'the target', 'this site', or asks to scan "
+            "or test without a URL, use this scoped target by default."
+        )
+    return out
 
 
 _TOOL_TAG_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
@@ -500,6 +559,8 @@ async def _call_tool(name: str, arguments: dict) -> str:
         result = handler(**arguments)
         if inspect.isawaitable(result):  # handlers may be sync or async
             result = await result
+        if not isinstance(result, str):
+            result = json.dumps(result, indent=2, ensure_ascii=False, default=str)
         return result
     except TypeError as exc:
         return f"Error: bad arguments for {name}: {exc}"
@@ -512,7 +573,72 @@ def _preview(text: str, limit: int = 240) -> str:
     return text[:limit] + ("…" if len(text) > limit else "")
 
 
-async def run_stream(messages: list[dict], *, max_rounds: int = 6, model: str | None = None):
+def _extract_report(result) -> str | None:
+    """Pull a markdown report from a tool result for the web UI report viewer."""
+    if isinstance(result, str):
+        if result.startswith("#") or "\n## " in result[:3000]:
+            return result
+        if len(result) > 900:
+            return result
+        return None
+    if isinstance(result, dict):
+        for key in ("report", "summary"):
+            val = result.get(key)
+            if isinstance(val, str) and len(val) > 80:
+                return val
+    return None
+
+
+def expand_slash_command(message: str, scope: dict | None = None) -> str:
+    """Expand webchat slash commands into full prompts for the model."""
+    text = message.strip()
+    if not text.startswith("/"):
+        return message
+    parts = text.split(maxsplit=1)
+    cmd = parts[0].lower()
+    args = parts[1].strip() if len(parts) > 1 else ""
+    target = args or (scope or {}).get("target_url", "").strip()
+
+    if cmd == "/analyze":
+        if not target:
+            return "Which URL should I analyze? Set a target in the scope bar or use `/analyze example.com`."
+        return (
+            f"Analyze {target} with analyze_site (detail=standard) and give me a clear "
+            "summary of the technology stack, security headers, and anything notable."
+        )
+    if cmd == "/scan":
+        if not target:
+            return "Which URL should I scan? Set a target in the scope bar or use `/scan example.com`."
+        return (
+            f"Run quick_recon on {target} and summarise all findings by severity. "
+            "Highlight anything that needs immediate attention."
+        )
+    if cmd == "/compare":
+        urls = args.split()
+        if len(urls) < 2:
+            return "Usage: `/compare site-a.com site-b.com`"
+        return (
+            f"Compare {urls[0]} and {urls[1]} using compare_and_summarize and "
+            "explain the biggest differences in technology and security."
+        )
+    if cmd == "/skills":
+        return "List every authored skill with skill_list and briefly explain what each one does."
+    if cmd in ("/help", "/?"):
+        return (
+            "List the main tools you have (search, research, analyze_site, quick_recon, "
+            "compare_and_summarize, security scanners) and when to use each. "
+            "Mention the slash commands: /analyze, /scan, /compare, /skills."
+        )
+    return message
+
+
+async def run_stream(
+    messages: list[dict],
+    *,
+    max_rounds: int = 6,
+    model: str | None = None,
+    scope: dict | None = None,
+):
     """Drive the tool-calling loop, yielding events as they happen.
 
     This is the single loop implementation; `chat()` consumes it for the CLI
@@ -546,6 +672,12 @@ async def run_stream(messages: list[dict], *, max_rounds: int = 6, model: str | 
             return
 
         yield {"type": "meta", "provider": provider, "model": model}
+
+        if scope and scope.get("target_url"):
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            scoped = system_prompt(today, scope)
+            if messages and messages[0].get("role") == "system":
+                messages[0]["content"] = scoped
 
         seen: dict[str, str] = {}
         for round_idx in range(max_rounds):
@@ -674,7 +806,15 @@ async def run_stream(messages: list[dict], *, max_rounds: int = 6, model: str | 
                     result = await _call_tool(name, arguments)
                     seen[key] = result
 
-                yield {"type": "tool_result", "name": name, "preview": _preview(result)}
+                event: dict = {
+                    "type": "tool_result",
+                    "name": name,
+                    "preview": _preview(result),
+                }
+                report = _extract_report(result)
+                if report:
+                    event["report"] = report
+                yield event
                 messages.append(
                     {"role": "tool", "tool_call_id": call.get("id", ""), "content": result}
                 )

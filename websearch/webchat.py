@@ -27,8 +27,8 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Route
 
-from . import llm, store
-from .agent import run_stream
+from . import llm, skills, store
+from .agent import expand_slash_command, run_stream
 
 _HTML = Path(__file__).resolve().parent / "static" / "chat.html"
 
@@ -86,8 +86,32 @@ async def conversation_get(request: Request) -> JSONResponse:
     conv = store.load(request.path_params["conv_id"])
     if conv is None:
         return JSONResponse({"error": "not found"}, status_code=404)
-    return JSONResponse({"id": conv["id"], "title": conv.get("title", ""),
-                         "turns": conv.get("turns", [])})
+    return JSONResponse({
+        "id": conv["id"],
+        "title": conv.get("title", ""),
+        "scope": conv.get("scope", {"target_url": ""}),
+        "turns": conv.get("turns", []),
+    })
+
+
+async def conversation_scope(request: Request) -> JSONResponse:
+    """Pin or clear the target URL for a conversation."""
+    data = await request.json()
+    conv_id = request.path_params["conv_id"]
+    target = (data.get("target_url") or "").strip()
+    if not store.load(conv_id):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    ok = store.set_scope(conv_id, target)
+    conv = store.load(conv_id)
+    return JSONResponse({
+        "ok": ok,
+        "scope": conv.get("scope", {"target_url": ""}) if conv else {},
+    })
+
+
+async def skills_catalog(request: Request) -> JSONResponse:
+    """Return the authored skill catalog for the UI."""
+    return JSONResponse({"ok": True, "skills": skills.skill_catalog()})
 
 
 async def conversation_delete(request: Request) -> JSONResponse:
@@ -113,24 +137,29 @@ async def chat(request: Request) -> EventSourceResponse:
             return
 
         conv = store.load_or_create(conv_id)
+        scope = conv.get("scope", {"target_url": ""})
+        message = expand_slash_command(message, scope)
         if not conv.get("title"):
             conv["title"] = message[:60]
         conv["messages"].append({"role": "user", "content": message})
         conv["turns"].append({"role": "user", "content": message})
         # Tell the client the id + title up front (new chats need the id).
         yield {"data": json.dumps({"type": "conversation", "id": conv["id"],
-                                   "title": conv["title"]})}
+                                   "title": conv["title"],
+                                   "scope": scope})}
 
         turn: dict = {"role": "assistant", "content": "", "steps": []}
         answer_text = ""
         stopped = False
         try:
-            async for event in run_stream(conv["messages"], model=model):
+            async for event in run_stream(conv["messages"], model=model, scope=scope):
                 etype = event["type"]
                 if etype == "tool_call":
                     turn["steps"].append({"name": event["name"], "args": event.get("args", {})})
                 elif etype == "tool_result" and turn["steps"]:
                     turn["steps"][-1]["preview"] = event.get("preview", "")
+                    if event.get("report"):
+                        turn["steps"][-1]["report"] = event["report"]
                 # Accumulate the streamed answer so a turn stopped mid-generation
                 # still persists what was produced. `answer` is the final,
                 # authoritative text; `answer_reset` discards a tool-call preamble.
@@ -173,8 +202,10 @@ app = Starlette(routes=[
     Route("/", index),
     Route("/api/status", status),
     Route("/api/models", models),
+    Route("/api/skills", skills_catalog),
     Route("/api/conversations", conversations),
     Route("/api/conversations/{conv_id}", conversation_get),
+    Route("/api/conversations/{conv_id}/scope", conversation_scope, methods=["POST"]),
     Route("/api/conversations/{conv_id}/delete", conversation_delete, methods=["POST"]),
     Route("/api/conversations/{conv_id}/rename", conversation_rename, methods=["POST"]),
     Route("/api/chat", chat, methods=["POST"]),

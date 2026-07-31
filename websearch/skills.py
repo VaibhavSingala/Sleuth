@@ -319,6 +319,31 @@ def skill_list() -> str:
     return "\n".join(lines)
 
 
+def skill_catalog() -> list[dict]:
+    """Structured skill catalog for the webchat UI."""
+    if not config.SKILLS_ENABLED:
+        return []
+    REGISTRY.refresh()
+    catalog: list[dict] = []
+    for name in sorted(REGISTRY.skills):
+        skill = REGISTRY.skills[name]
+        props = skill.schema.get("properties", {}) if skill.schema else {}
+        params = list(props.keys())
+        example_args = ", ".join(
+            f'{p}="..."' for p in params[:3]
+        )
+        example = f"{name}({example_args})" if example_args else f"{name}()"
+        catalog.append({
+            "name": name,
+            "description": skill.description or f"Skill '{name}'.",
+            "ok": skill.error is None and skill.fn is not None,
+            "parameters": params,
+            "example": example,
+            "error": (skill.error or "")[:120] if skill.error else "",
+        })
+    return catalog
+
+
 def skill_read(name: str) -> str:
     """Return the full source of an authored skill so it can be edited."""
     path = config.SKILLS_DIR / f"{name}.py"
