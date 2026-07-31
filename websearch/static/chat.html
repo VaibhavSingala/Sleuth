@@ -433,7 +433,6 @@ async function sendMessage(){
 async function loadSkills(){
   try{const r=await fetch('/api/skills');const j=await r.json();const list=$('skillsList');
     const items=j.skills||[];
-    $('sessCnt').textContent=document.querySelectorAll('.conv').length;
     if(!items.length){list.innerHTML='<div class="empty">arsenal empty — skill_write to arm</div>';return;}
     list.innerHTML=items.map(s=>'<div class="skill-item '+(s.ok?'ok':'broken')+'">'+
       '<div class="nm">'+esc(s.name)+'</div><div class="desc">'+esc(s.description)+'</div></div>').join('');
@@ -458,7 +457,7 @@ async function openConv(id){
     (c.turns||[]).forEach(t=>{
       if(t.role==='user')userMsg(t.content);
       else{const {steps,body}=botMsg();
-        (t.steps||[]).forEach(s=>{const b=addChip(steps,s.name,s.args||{},true,s.preview||'',s.report||'');finishChip(b,s.preview,s.report);});
+        (t.steps||[]).forEach(s=>addChip(steps,s.name,s.args||{},true,s.preview||'',s.report||''));
         body.querySelector('.thinking')?.remove();
         body.innerHTML=t.content?md(t.content):'<span class="err">[NULL]</span>';}
     });
