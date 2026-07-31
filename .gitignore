@@ -4,3 +4,4 @@ conversations/
 __pycache__/
 *.pyc
 .backups/
+skills/.training/
