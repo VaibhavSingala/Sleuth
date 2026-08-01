@@ -84,7 +84,7 @@
     box-shadow:0 0 6px rgba(0,255,65,.2)}
   .term-toolbar .hint{color:var(--muted);font-size:10px}
   .burger{display:none;background:none;border:1px solid var(--border);color:var(--text);padding:4px 8px;cursor:pointer}
-  main{flex:1;overflow-y:auto;padding:12px;scroll-behavior:smooth}
+  main{flex:1;overflow-y:auto;padding:12px}
   .wrap{max-width:900px;margin:0 auto}
   .boot{color:var(--muted);font-size:11px;margin-bottom:16px;line-height:1.7}
   .boot .line{opacity:0;animation:fadein .3s forwards}
@@ -302,7 +302,28 @@ function md(src){
   return out.join('\n').replace(/\x00(\d+) /g,(_,i)=>f[+i]);
 }
 const argSummary=a=>!a?'':(a.query||a.url||a.url_a||a.expression||a.path||a.command||a.code?.slice?.(0,40)||a.name||'');
-function scrollDown(){$('main').scrollTop=$('main').scrollHeight;}
+// Auto-follow the stream only while the user is parked at the bottom.
+// Any upward scroll/wheel unsticks immediately so thinking/token growth can't yank them back.
+let stickBottom=true, _scrollProg=false;
+function nearBottom(el,px=64){
+  return el.scrollHeight-el.scrollTop-el.clientHeight<px;
+}
+function scrollDown(force){
+  const el=$('main');
+  if(force)stickBottom=true;
+  if(!force&&!stickBottom)return;
+  _scrollProg=true;
+  el.scrollTop=el.scrollHeight;
+  requestAnimationFrame(()=>{_scrollProg=false;});
+}
+$('main').addEventListener('scroll',()=>{
+  if(_scrollProg)return;
+  stickBottom=nearBottom($('main'));
+},{passive:true});
+$('main').addEventListener('wheel',e=>{
+  if(e.deltaY<0)stickBottom=false;
+},{passive:true});
+$('main').addEventListener('touchmove',()=>{stickBottom=nearBottom($('main'));},{passive:true});
 
 function feed(msg,type='info'){
   const d=document.createElement('div');d.className='feed-item '+type;
@@ -394,7 +415,7 @@ async function sendMessage(){
   const text=input.value.trim();if(!text||busy)return;
   hideSlashMenu();setBusy(true);currentAbort=new AbortController();
   input.value='';input.style.height='auto';
-  userMsg(text);const {steps,body}=botMsg();scrollDown();
+  userMsg(text);const {steps,body}=botMsg();scrollDown(true);
   let chip=null,buf='',streaming=false,reasonEl=null;
   try{
     const resp=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -461,7 +482,7 @@ async function openConv(id){
         body.querySelector('.thinking')?.remove();
         body.innerHTML=t.content?md(t.content):'<span class="err">[NULL]</span>';}
     });
-    feed('session restored :: '+id.slice(0,8),'ok');loadConvs();scrollDown();
+    feed('session restored :: '+id.slice(0,8),'ok');loadConvs();scrollDown(true);
   }catch(e){}
 }
 async function delConv(id){

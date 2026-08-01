@@ -1,6 +1,7 @@
 import json
 from typing import List, Dict, Any
 
+
 def analyze_zap_alerts(url: str) -> str:
     """
     Reads raw alerts from OWASP ZAP for a given URL and provides a structured, 
@@ -15,7 +16,7 @@ def analyze_zap_alerts(url: str) -> str:
     try:
         # 1. Call the existing ZAP tool
         alerts_data = zap_alerts(url=url)
-        
+
         if not alerts_data or isinstance(alerts_data, str) and "No alerts found" in alerts_data:
             return f"✅ **ZAP Alert Analysis for {url}:**\n\n🎉 No security alerts were found by OWASP ZAP! The site appears clean based on this scan."
 
@@ -24,7 +25,7 @@ def analyze_zap_alerts(url: str) -> str:
             try:
                 alerts = json.loads(alerts_data)
             except json.JSONDecodeError:
-                # If it's just a nicely formatted string, we might need to parse it differently, 
+                # If it's just a nicely formatted string, we might need to parse it differently,
                 # but for robustness, let's assume the tool returns JSON structure if possible.
                 return f"⚠️ **ZAP Alert Analysis for {url}:**\n\nCould not perfectly parse raw output from ZAP. Here is the raw summary:\n---\n{alerts_data}"
         else:
@@ -40,7 +41,8 @@ def analyze_zap_alerts(url: str) -> str:
         total_alerts = len(alerts)
 
         for alert in alerts:
-            severity = alert.get("risk", "Info") # ZAP often uses 'risk' field for severity mapping
+            # ZAP often uses 'risk' field for severity mapping
+            severity = alert.get("risk", "Info")
             if severity not in categorized_alerts:
                 # Handle cases where risk might be something else (e.g., "Informational")
                 categorized_alerts[f"{severity}"] = []

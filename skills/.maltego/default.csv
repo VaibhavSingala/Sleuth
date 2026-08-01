@@ -1,0 +1,12 @@
+EntityType,Value,PropertiesJSON,Id
+maltego.Domain,example.com,{},n1
+maltego.Website,https://example.com/,{},n2
+maltego.IPv4Address,93.184.216.34,{},n4
+maltego.EmailAddress,admin@example.com,{},n6
+maltego.URL,https://blog.example.com/x,{},n7
+maltego.AS,AS13335,{},n8
+
+# Links
+SourceId,TargetId,Label,LinkId
+n1,n2,hosts,e3
+n1,n4,resolves,e5

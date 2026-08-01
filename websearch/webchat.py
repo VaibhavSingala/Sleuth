@@ -35,7 +35,10 @@ _HTML = Path(__file__).resolve().parent / "static" / "chat.html"
 
 async def index(request: Request) -> HTMLResponse:
     try:
-        return HTMLResponse(_HTML.read_text(encoding="utf-8"))
+        return HTMLResponse(
+            _HTML.read_text(encoding="utf-8"),
+            headers={"Cache-Control": "no-store"},
+        )
     except OSError as exc:
         return HTMLResponse(f"<h1>chat.html missing</h1><pre>{exc}</pre>", status_code=500)
 
@@ -131,18 +134,22 @@ async def chat(request: Request) -> EventSourceResponse:
     model = (data.get("model") or "").strip() or None
 
     async def events():
-        if not message:
+        # Capture outer `message` under a local name. Assigning to `message`
+        # later (expand_slash_command) would otherwise make it a local for the
+        # whole function and crash the empty-check with UnboundLocalError.
+        msg = message
+        if not msg:
             yield {"data": json.dumps({"type": "error", "text": "Empty message."})}
             yield {"data": json.dumps({"type": "done"})}
             return
 
         conv = store.load_or_create(conv_id)
         scope = conv.get("scope", {"target_url": ""})
-        message = expand_slash_command(message, scope)
+        msg = expand_slash_command(msg, scope)
         if not conv.get("title"):
-            conv["title"] = message[:60]
-        conv["messages"].append({"role": "user", "content": message})
-        conv["turns"].append({"role": "user", "content": message})
+            conv["title"] = msg[:60]
+        conv["messages"].append({"role": "user", "content": msg})
+        conv["turns"].append({"role": "user", "content": msg})
         # Tell the client the id + title up front (new chats need the id).
         yield {"data": json.dumps({"type": "conversation", "id": conv["id"],
                                    "title": conv["title"],
@@ -170,13 +177,11 @@ async def chat(request: Request) -> EventSourceResponse:
                 elif etype == "answer":
                     answer_text = event["text"]
                 yield {"data": json.dumps(event)}
-        except (asyncio.CancelledError, GeneratorExit):
-            # The browser hit Stop and disconnected. Persist what we have (below,
-            # in finally) and re-raise so the server can tear the request down.
-            # Re-raising ends the async-for, which closes run_stream's HTTP
-            # connection to the LLM, stopping generation.
+        except asyncio.CancelledError:
+            # Client disconnected (Stop / navigation). Persist below, then exit
+            # cleanly — re-raising here makes uvicorn log
+            # "ASGI callable returned without completing response".
             stopped = True
-            raise
         except Exception as exc:  # a crash must not hang the browser's stream
             yield {"data": json.dumps({"type": "error", "text": f"{type(exc).__name__}: {exc}"})}
             answer_text = answer_text or f"(error: {exc})"
@@ -193,7 +198,10 @@ async def chat(request: Request) -> EventSourceResponse:
             except OSError:
                 pass
 
-        yield {"data": json.dumps({"type": "done"})}
+        try:
+            yield {"data": json.dumps({"type": "done"})}
+        except (asyncio.CancelledError, GeneratorExit):
+            return
 
     return EventSourceResponse(events())
 

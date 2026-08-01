@@ -1,0 +1,57 @@
+{
+  "name": "default",
+  "updated": "2026-08-01T06:36:38.232430+00:00",
+  "entities": [
+    {
+      "id": "n1",
+      "type": "maltego.Domain",
+      "value": "example.com",
+      "properties": {}
+    },
+    {
+      "id": "n2",
+      "type": "maltego.Website",
+      "value": "https://example.com/",
+      "properties": {}
+    },
+    {
+      "id": "n4",
+      "type": "maltego.IPv4Address",
+      "value": "93.184.216.34",
+      "properties": {}
+    },
+    {
+      "id": "n6",
+      "type": "maltego.EmailAddress",
+      "value": "admin@example.com",
+      "properties": {}
+    },
+    {
+      "id": "n7",
+      "type": "maltego.URL",
+      "value": "https://blog.example.com/x",
+      "properties": {}
+    },
+    {
+      "id": "n8",
+      "type": "maltego.AS",
+      "value": "AS13335",
+      "properties": {}
+    }
+  ],
+  "links": [
+    {
+      "id": "e3",
+      "source": "n1",
+      "target": "n2",
+      "label": "hosts"
+    },
+    {
+      "id": "e5",
+      "source": "n1",
+      "target": "n4",
+      "label": "resolves"
+    }
+  ],
+  "_next_id": 9
+}

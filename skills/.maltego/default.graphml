@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:mtg="http://maltego.paterva.com/xml/mtgx">
+  <key attr.name="MaltegoEntity" for="node" id="d4"/>
+  <key for="node" id="d5"/>
+  <key attr.name="MaltegoLink" for="edge" id="d6"/>
+  <graph edgedefault="directed" id="G">
+    <node id="n1">
+      <data key="d4">
+        <mtg:MaltegoEntity xmlns:mtg="http://maltego.paterva.com/xml/mtgx" type="maltego.Domain">
+          <mtg:Properties>
+          <mtg:Property displayName="Domain Name" hidden="false" name="fqdn" nullable="true" readonly="false" type="string">
+            <mtg:Value>example.com</mtg:Value>
+          </mtg:Property>
+          </mtg:Properties>
+        </mtg:MaltegoEntity>
+      </data>
+      <data key="d5">
+        <mtg:EntityRenderer xmlns:mtg="http://maltego.paterva.com/xml/mtgx">
+          <mtg:Position x="120.0" y="120.0"/>
+        </mtg:EntityRenderer>
+      </data>
+    </node>
+    <node id="n2">
+      <data key="d4">
+        <mtg:MaltegoEntity xmlns:mtg="http://maltego.paterva.com/xml/mtgx" type="maltego.Website">
+          <mtg:Properties>
+          <mtg:Property displayName="Website" hidden="false" name="website" nullable="true" readonly="false" type="string">
+            <mtg:Value>https://example.com/</mtg:Value>
+          </mtg:Property>
+          </mtg:Properties>
+        </mtg:MaltegoEntity>
+      </data>
+      <data key="d5">
+        <mtg:EntityRenderer xmlns:mtg="http://maltego.paterva.com/xml/mtgx">
+          <mtg:Position x="340.0" y="120.0"/>
+        </mtg:EntityRenderer>
+      </data>
+    </node>
+    <node id="n4">
+      <data key="d4">
+        <mtg:MaltegoEntity xmlns:mtg="http://maltego.paterva.com/xml/mtgx" type="maltego.IPv4Address">
+          <mtg:Properties>
+          <mtg:Property displayName="IP Address" hidden="false" name="ipv4-address" nullable="true" readonly="false" type="string">
+            <mtg:Value>93.184.216.34</mtg:Value>
+          </mtg:Property>
+          </mtg:Properties>
+        </mtg:MaltegoEntity>
+      </data>
+      <data key="d5">
+        <mtg:EntityRenderer xmlns:mtg="http://maltego.paterva.com/xml/mtgx">
+          <mtg:Position x="120.0" y="280.0"/>
+        </mtg:EntityRenderer>
+      </data>
+    </node>
+    <node id="n6">
+      <data key="d4">
+        <mtg:MaltegoEntity xmlns:mtg="http://maltego.paterva.com/xml/mtgx" type="maltego.EmailAddress">
+          <mtg:Properties>
+          <mtg:Property displayName="Email Address" hidden="false" name="email" nullable="true" readonly="false" type="string">
+            <mtg:Value>admin@example.com</mtg:Value>
+          </mtg:Property>
+          </mtg:Properties>
+        </mtg:MaltegoEntity>
+      </data>
+      <data key="d5">
+        <mtg:EntityRenderer xmlns:mtg="http://maltego.paterva.com/xml/mtgx">
+          <mtg:Position x="340.0" y="280.0"/>
+        </mtg:EntityRenderer>
+      </data>
+    </node>
+    <node id="n7">
+      <data key="d4">
+        <mtg:MaltegoEntity xmlns:mtg="http://maltego.paterva.com/xml/mtgx" type="maltego.URL">
+          <mtg:Properties>
+          <mtg:Property displayName="URL" hidden="false" name="url" nullable="true" readonly="false" type="string">
+            <mtg:Value>https://blog.example.com/x</mtg:Value>
+          </mtg:Property>
+          </mtg:Properties>
+        </mtg:MaltegoEntity>
+      </data>
+      <data key="d5">
+        <mtg:EntityRenderer xmlns:mtg="http://maltego.paterva.com/xml/mtgx">
+          <mtg:Position x="120.0" y="440.0"/>
+        </mtg:EntityRenderer>
+      </data>
+    </node>
+    <node id="n8">
+      <data key="d4">
+        <mtg:MaltegoEntity xmlns:mtg="http://maltego.paterva.com/xml/mtgx" type="maltego.AS">
+          <mtg:Properties>
+          <mtg:Property displayName="AS Number" hidden="false" name="as.number" nullable="true" readonly="false" type="string">
+            <mtg:Value>AS13335</mtg:Value>
+          </mtg:Property>
+          </mtg:Properties>
+        </mtg:MaltegoEntity>
+      </data>
+      <data key="d5">
+        <mtg:EntityRenderer xmlns:mtg="http://maltego.paterva.com/xml/mtgx">
+          <mtg:Position x="340.0" y="440.0"/>
+        </mtg:EntityRenderer>
+      </data>
+    </node>
+    <edge id="e3" source="n1" target="n2">
+      <data key="d6">
+        <mtg:MaltegoLink xmlns:mtg="http://maltego.paterva.com/xml/mtgx" type="maltego.link.manual-link">
+          <mtg:Properties>
+            <mtg:Property displayName="Label" name="maltego.link.manual-link.label" type="string"><mtg:Value>hosts</mtg:Value></mtg:Property>
+          </mtg:Properties>
+        </mtg:MaltegoLink>
+      </data>
+    </edge>
+    <edge id="e5" source="n1" target="n4">
+      <data key="d6">
+        <mtg:MaltegoLink xmlns:mtg="http://maltego.paterva.com/xml/mtgx" type="maltego.link.manual-link">
+          <mtg:Properties>
+            <mtg:Property displayName="Label" name="maltego.link.manual-link.label" type="string"><mtg:Value>resolves</mtg:Value></mtg:Property>
+          </mtg:Properties>
+        </mtg:MaltegoLink>
+      </data>
+    </edge>
+  </graph>
+</graphml>
