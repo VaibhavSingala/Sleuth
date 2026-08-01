@@ -34,6 +34,11 @@ services:
       # the host source. These override whatever .env sets.
       SLEUTH_CODE_ROOT: "/app"
       SLEUTH_ALLOW_EXEC: "true"
+      # ADB client in this container → host adb server (emulator/AVD on the host).
+      # On the host run: adb kill-server && adb -a nodaemon server start
+      SLEUTH_ADB_HOST: "host.docker.internal"
+      SLEUTH_ADB_PORT: "5037"
+      SLEUTH_SKILL_TIMEOUT: "180"   # APK install / pipeline needs headroom
     extra_hosts:
       - "host.docker.internal:host-gateway"   # reach host services (LLM, Burp)
     volumes:

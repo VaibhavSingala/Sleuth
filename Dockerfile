@@ -9,6 +9,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# adb client talks to a host emulator/device (see SLEUTH_ADB_HOST in compose).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends android-tools-adb ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Python deps first, for layer caching. wapiti3 (the free scanner) is included
 # so the container is batteries-included.
 COPY requirements.txt ./

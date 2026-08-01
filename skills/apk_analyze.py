@@ -1,8 +1,9 @@
 """Defensive static APK triage for Sleuth.
 
 Read-only analysis of Android packages: fingerprint, structure, manifest /
-permissions, string IOCs, and native .so capability map. Never installs or
-executes the sample. Drop APKs under apks/ (Docker: /app/apks/).
+permissions, string IOCs, and native .so capability map. Can also download a
+direct APK URL into apks/. Dynamic install/launch lives in apk_device (host
+emulator via ADB). Drop or download samples under apks/ (Docker: /app/apks/).
 """
 
 from __future__ import annotations
@@ -20,7 +21,9 @@ _SKILLS_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SKILLS_DIR.parent
 _APKS_DIR = _PROJECT_ROOT / "apks"
 
-Action = Literal["triage", "manifest", "iocs", "natives", "report"]
+Action = Literal["triage", "manifest", "iocs", "natives", "report", "download"]
+
+_MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024  # 512 MiB
 
 # Dangerous / high-interest Android permissions (short names without prefix).
 _DANGEROUS_PERMS = {
@@ -603,6 +606,110 @@ def _natives(path: Path) -> dict[str, Any]:
     return result
 
 
+def _safe_filename(name: str) -> str:
+    base = Path(name or "sample.apk").name
+    base = re.sub(r"[^\w.\-]+", "_", base).strip("._") or "sample.apk"
+    if not base.lower().endswith(".apk"):
+        base += ".apk"
+    return base[:180]
+
+
+def _download(url: str, filename: str = "") -> dict[str, Any]:
+    """Download an APK from a direct URL into apks/."""
+    url = (url or "").strip()
+    if not url:
+        return {"ok": False, "error": "url is required for download."}
+    if not url.lower().startswith(("http://", "https://")):
+        return {"ok": False, "error": "url must start with http:// or https://"}
+
+    _APKS_DIR.mkdir(parents=True, exist_ok=True)
+    # Derive filename from URL path if not given
+    from urllib.parse import urlparse, unquote
+
+    parsed = urlparse(url)
+    guessed = unquote(Path(parsed.path).name) if parsed.path else ""
+    out_name = _safe_filename(filename or guessed or "download.apk")
+    dest = (_APKS_DIR / out_name).resolve()
+    if not _is_under(dest, _APKS_DIR.resolve()):
+        return {"ok": False, "error": "refused unsafe filename"}
+
+    try:
+        import httpx
+    except ImportError:
+        httpx = None  # type: ignore
+
+    tmp = dest.with_suffix(dest.suffix + ".partial")
+    try:
+        if httpx is not None:
+            with httpx.Client(follow_redirects=True, timeout=120.0) as client:
+                with client.stream("GET", url) as resp:
+                    if resp.status_code >= 400:
+                        return {
+                            "ok": False,
+                            "error": f"HTTP {resp.status_code} fetching {url}",
+                        }
+                    total = 0
+                    with tmp.open("wb") as fh:
+                        for chunk in resp.iter_bytes(1 << 16):
+                            total += len(chunk)
+                            if total > _MAX_DOWNLOAD_BYTES:
+                                fh.close()
+                                tmp.unlink(missing_ok=True)
+                                return {
+                                    "ok": False,
+                                    "error": f"download exceeds {_MAX_DOWNLOAD_BYTES} bytes limit",
+                                }
+                            fh.write(chunk)
+        else:
+            import urllib.request
+
+            with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310
+                total = 0
+                with tmp.open("wb") as fh:
+                    while True:
+                        chunk = resp.read(1 << 16)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > _MAX_DOWNLOAD_BYTES:
+                            fh.close()
+                            tmp.unlink(missing_ok=True)
+                            return {
+                                "ok": False,
+                                "error": f"download exceeds {_MAX_DOWNLOAD_BYTES} bytes limit",
+                            }
+                        fh.write(chunk)
+
+        # Basic APK/ZIP sanity check
+        with tmp.open("rb") as fh:
+            magic = fh.read(4)
+        if magic[:2] != b"PK":
+            tmp.unlink(missing_ok=True)
+            return {
+                "ok": False,
+                "error": "downloaded file is not a ZIP/APK (missing PK header)",
+            }
+
+        tmp.replace(dest)
+    except Exception as exc:
+        tmp.unlink(missing_ok=True)
+        return {"ok": False, "error": f"download failed: {type(exc).__name__}: {exc}"}
+
+    hashes = _hash_file(dest)
+    return {
+        "ok": True,
+        "action": "download",
+        "url": url,
+        "path": str(dest),
+        "size_bytes": dest.stat().st_size,
+        "hashes": hashes,
+        "hint": (
+            "Next: apk_analyze(action='report', apk=path) for static triage, "
+            "or apk_device(action='install', apk=path) to load it on a host emulator."
+        ),
+    }
+
+
 def _report(path: Path) -> dict[str, Any]:
     triage = _triage(path)
     manifest = _manifest(path)
@@ -642,23 +749,37 @@ def _report(path: Path) -> dict[str, Any]:
     }
 
 
-def apk_analyze(action: str, apk: str = "") -> dict[str, Any]:
+def apk_analyze(
+    action: str,
+    apk: str = "",
+    url: str = "",
+    filename: str = "",
+) -> dict[str, Any]:
     """
-    Defensive static analysis of an Android APK (read-only; never executed).
+    Defensive static analysis of an Android APK, plus direct-URL download into apks/.
 
     Typical flow:
-      1. Drop the sample under apks/ (Docker path: /app/apks/sample.apk).
-      2. apk_analyze(action="report", apk="/app/apks/sample.apk") for a full pass,
-         or call triage / manifest / iocs / natives individually.
+      1. apk_analyze(action="download", url="https://…/app.apk")
+         — or drop a file under apks/ (Docker: /app/apks/).
+      2. apk_analyze(action="report", apk="/app/apks/app.apk") for static triage.
+      3. Use apk_device to install/launch on a host Android emulator via ADB.
+
+    Static actions never execute the sample. download only fetches bytes to disk.
 
     Args:
-        action: One of triage, manifest, iocs, natives, report.
+        action: One of download, triage, manifest, iocs, natives, report.
         apk: Path to the .apk (absolute under project/apks, or relative to apks/).
+        url: Direct http(s) URL to an .apk (for download).
+        filename: Optional save name under apks/ when downloading.
 
     Returns:
-        Dict with ok and action-specific findings (hashes, permissions, IOCs, …).
+        Dict with ok and action-specific findings (path, hashes, permissions, IOCs, …).
     """
     action = (action or "").strip().lower().replace("-", "_")
+
+    if action == "download":
+        return _download(url, filename)
+
     resolved = _resolve_apk(apk)
     if isinstance(resolved, dict):
         return resolved
@@ -675,7 +796,7 @@ def apk_analyze(action: str, apk: str = "") -> dict[str, Any]:
         return {
             "ok": False,
             "error": (
-                f"Unknown action '{action}'. Use one of: "
+                f"Unknown action '{action}'. Use one of: download, "
                 + ", ".join(dispatch.keys())
             ),
         }
