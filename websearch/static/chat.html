@@ -116,6 +116,7 @@
   .ops-line .state{margin-left:auto;font-size:10px}
   .ops-line .state.run{color:var(--amber);animation:blink 1s step-end infinite}
   .ops-line .state.ok{color:var(--glow)}
+  .ops-line .state.halt{color:#f66}
   @keyframes blink{50%{opacity:0}}
   .spinner{display:inline-block;width:10px;height:10px;border:2px solid var(--amber);
     border-top-color:transparent;border-radius:50%;animation:spin .6s linear infinite}
@@ -387,6 +388,17 @@ function finishChip(blk,preview,report){
   if(preview){let p=blk.querySelector('.term-out');if(!p){p=document.createElement('div');p.className='term-out';blk.appendChild(p);}p.textContent=preview;anchor=p;}
   if(report)addReport(anchor,report,'DUMP :: '+blk._name);
 }
+function haltChip(blk,reason){
+  if(!blk||!blk.classList.contains('running'))return;
+  blk.classList.remove('running');blk.classList.add('done');
+  const st=blk.querySelector('.state');if(st){st.className='state halt';st.textContent='['+(reason||'HALT')+']';}
+  if(blk._pid!=null)runningMap.delete(blk._pid);
+  feed('HALT #'+String(blk._pid||0).padStart(4,'0')+' '+blk._name,'err');
+}
+function clearRunning(reason){
+  log.querySelectorAll('.ops-block.running').forEach(blk=>haltChip(blk,reason||'HALT'));
+  runningMap.clear();updateRunning();
+}
 
 function setBusy(b){busy=b;send.textContent=b?'HALT':'EXEC';send.classList.toggle('stop',b);setOpsState(b?'BUSY':'IDLE');}
 function stopMessage(){if(currentAbort)currentAbort.abort();}
@@ -416,7 +428,7 @@ async function sendMessage(){
   hideSlashMenu();setBusy(true);currentAbort=new AbortController();
   input.value='';input.style.height='auto';
   userMsg(text);const {steps,body}=botMsg();scrollDown(true);
-  let chip=null,buf='',streaming=false,reasonEl=null;
+  let chip=null,buf='',streaming=false,reasonEl=null,halted=false;
   try{
     const resp=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
       signal:currentAbort.signal,body:JSON.stringify({conversation_id:currentConv,message:text,model:modelSel.value||''})});
@@ -443,12 +455,18 @@ async function sendMessage(){
     if(streaming&&!body.querySelector('h1,h2,p,ul,pre'))body.innerHTML=md(buf);
   }catch(e){
     if(e.name==='AbortError'){
+      halted=true;
       body.querySelector('.thinking')?.remove();
       if(streaming)body.innerHTML=md(buf);
       body.insertAdjacentHTML('beforeend','<div class="stopped">[HALTED] operator interrupt</div>');
       feed('HALTED by operator','err');
     }else{body.innerHTML='<span class="err">[LINK FAIL] '+esc(String(e))+'</span>';feed('link failure','err');}
-  }finally{setBusy(false);currentAbort=null;input.focus();loadConvs();}
+  }finally{
+    // HALT / disconnect / error must not leave stale PIDs in the live-ops panel.
+    steps.querySelectorAll('.ops-block.running').forEach(b=>haltChip(b,halted?'HALT':'DROP'));
+    updateRunning();
+    setBusy(false);currentAbort=null;input.focus();loadConvs();
+  }
 }
 
 async function loadSkills(){
@@ -472,6 +490,8 @@ async function loadConvs(){
   }catch(e){}
 }
 async function openConv(id){
+  if(busy&&currentAbort)currentAbort.abort();
+  clearRunning();
   try{const r=await fetch('/api/conversations/'+id);const c=await r.json();
     currentConv=id;scopeTarget=c.scope?.target_url||'';scopeInput.value=scopeTarget;
     const boot=bootEl;log.innerHTML='';log.appendChild(boot);
@@ -525,7 +545,12 @@ function bootSequence(){
 })();
 
 setInterval(()=>{$('clock').textContent=new Date().toTimeString().slice(0,8);},1000);
-$('newChat').onclick=()=>{currentConv=null;const boot=bootEl;log.innerHTML='';log.appendChild(boot);scopeInput.value='';scopeTarget='';loadConvs();input.focus();feed('new session','info');};
+$('newChat').onclick=()=>{
+  if(busy&&currentAbort)currentAbort.abort();
+  clearRunning();
+  currentConv=null;const boot=bootEl;log.innerHTML='';log.appendChild(boot);
+  scopeInput.value='';scopeTarget='';loadConvs();input.focus();feed('new session','info');
+};
 $('burger').onclick=()=>sidebar.classList.toggle('open');
 $('opsToggle').onclick=()=>opsPanel.classList.toggle('open');
 $('toggleSkills').onclick=()=>{$('skillsPanel').classList.toggle('open');if($('skillsPanel').classList.contains('open'))loadSkills();};
