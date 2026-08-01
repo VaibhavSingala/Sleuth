@@ -32,3 +32,9 @@ uvicorn>=0.30         # ASGI server
 sse-starlette>=2.0    # Server-Sent Events streaming to the browser
 
 requests
+
+# APK static triage (skills/apk_analyze.py) — manifest via androguard,
+# native .so maps via pyelftools. Optional at import time; skill soft-fails
+# the matching section if a package is missing.
+androguard>=4.1
+pyelftools>=0.31

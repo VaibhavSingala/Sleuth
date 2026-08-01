@@ -42,6 +42,7 @@ services:
       - ./skills:/app/skills                   # authored skills persist on the host
       - ./.backups:/app/.backups               # code_write snapshots persist
       - ./websearch:/app/websearch             # model's self-edits land on host source
+      - ./apks:/app/apks                       # APK samples for apk_analyze
     depends_on:
       - zap
     restart: unless-stopped

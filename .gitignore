@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 .backups/
 skills/.training/
+apks/*
+!apks/.gitkeep
