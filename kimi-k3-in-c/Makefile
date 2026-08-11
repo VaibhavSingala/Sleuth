@@ -88,8 +88,9 @@ LDFLAGS  ?= -lm $(OMP_LDFLAGS) -pthread
 
 # Flat include search across the module dirs: sources use "k3.h", "k3_cache.h" etc
 # rather than path-qualified includes, which keeps them relocatable.
-INCLUDES := -Iinclude -Iinclude/k3 -Ithird_party \
-            -Isrc/core -Isrc/io -Isrc/cache -Isrc/model -Isrc/tokenizer
+INCLUDES := -Iinclude -Iinclude/k3 -Iinclude/model -Ithird_party \
+            -Isrc/core -Isrc/io -Isrc/cache -Isrc/model -Isrc/tokenizer \
+            -Isrc/gguf -Isrc/quant -Isrc/ops
 
 # ----------------------------------------------------------------------------- files --
 ENGINE_SRC := src/core/k3_ops.c \
@@ -100,6 +101,17 @@ ENGINE_OBJ := $(patsubst %.c,$(BUILD)/%.o,$(ENGINE_SRC))
 
 CLI_SRC    := src/cli/k3_run.c
 CLI_BIN    := $(BIN)/k3
+
+# Generic GGUF / qwen35moe engine (direct GGUF load — no second weight file).
+GGUF_SRC := src/gguf/gguf_reader.c \
+            src/quant/quant.c \
+            src/ops/ops.c \
+            src/model/qwen35.c \
+            src/tokenizer/bpe.c
+GGUF_OBJ := $(patsubst %.c,$(BUILD)/%.o,$(GGUF_SRC))
+MODEL_BIN := $(BIN)/model
+CONVERTER_BIN := $(BIN)/model-converter
+COMPARE_BIN := $(BIN)/compare-model
 
 # Tests that need no checkpoint. These run in CI on every push.
 UNIT_TESTS := test_ops test_cache test_st test_cfg test_tok scale_test k3_model
@@ -118,9 +130,9 @@ TOK_FILES  ?= $(HOME)/k3model
 
 # ---------------------------------------------------------------------------- targets --
 .PHONY: all test test-all bench portable debug asan ubsan format clean install help \
-        tok cfg ops cache st oracle weights-test
+        tok cfg ops cache st oracle weights-test gguf
 
-all: $(CLI_BIN)
+all: $(CLI_BIN) $(MODEL_BIN) $(CONVERTER_BIN) $(COMPARE_BIN)
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -128,6 +140,17 @@ $(BUILD)/%.o: %.c
 
 $(CLI_BIN): $(CLI_SRC) $(ENGINE_OBJ) | $(BIN)
 	$(CC) $(CFLAGS) $(INCLUDES) $(CLI_SRC) $(ENGINE_OBJ) -o $@ $(LDFLAGS)
+
+$(MODEL_BIN): src/cli/model_run.c $(GGUF_OBJ) | $(BIN)
+	$(CC) $(CFLAGS) $(INCLUDES) $^ -o $@ $(LDFLAGS)
+
+$(CONVERTER_BIN): src/cli/model_converter.c $(GGUF_OBJ) | $(BIN)
+	$(CC) $(CFLAGS) $(INCLUDES) $^ -o $@ $(LDFLAGS)
+
+$(COMPARE_BIN): src/cli/compare_model.c $(GGUF_OBJ) | $(BIN)
+	$(CC) $(CFLAGS) $(INCLUDES) $^ -o $@ $(LDFLAGS)
+
+gguf: $(MODEL_BIN) $(CONVERTER_BIN) $(COMPARE_BIN)
 
 $(BIN):
 	@mkdir -p $(BIN)

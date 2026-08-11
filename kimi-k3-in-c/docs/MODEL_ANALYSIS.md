@@ -1,6 +1,6 @@
 # Model Analysis: Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive (Q4_K_M)
 
-**Status:** inspection only — no weights modified, no inference path claimed yet.  
+**Status:** GGUF validated; C99 direct-load engine scaffolded (`bin/model-converter`, `bin/model`, `bin/compare-model`).  
 **Date:** 2026-08-11  
 **Source path (user):**  
 `D:\lmstudio\models\HauhauCS\Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive\Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf`  
