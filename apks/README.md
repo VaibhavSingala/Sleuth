@@ -7,7 +7,10 @@ Drop `.apk` files here (Docker mounts this at `/app/apks`).
 ```text
 apk_analyze(action="download", url="https://example.com/app.apk")
 apk_analyze(action="report", apk="/app/apks/app.apk")
+apkleaks(apk="/app/apks/app.apk")   # hardcoded secrets / keys / URIs (APKLeaks)
 ```
+
+Results from `apkleaks` land under `apks/apkleaks_out/`.
 
 ## Dynamic (host emulator via ADB)
 

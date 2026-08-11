@@ -38,3 +38,7 @@ requests
 # the matching section if a package is missing.
 androguard>=4.1
 pyelftools>=0.31
+
+# APK secret scan (skills/apkleaks.py) — wraps dwisiswant0/apkleaks CLI.
+# Needs jadx on PATH (APKLeaks can download it on first run).
+apkleaks>=2.6.0
