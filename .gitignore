@@ -8,3 +8,7 @@ skills/.training/
 apks/*
 !apks/.gitkeep
 !apks/README.md
+
+# kimi-k3-in-c build products
+kimi-k3-in-c/bin/
+kimi-k3-in-c/build/
