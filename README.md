@@ -10,6 +10,20 @@ for Ollama, which has no MCP client of its own).
 
 Works out of the box with **no API keys** — DuckDuckGo is the default backend.
 
+### Tiny model option — Needle 2
+
+Want to skip multi‑GB “uncensored” chat models? Fine-tune
+[Needle 2](https://github.com/cactus-compute/needle) (45M params, ~14MB) as
+Sleuth’s **tool router**. See [`needle_train/`](needle_train/):
+
+```bash
+cd needle_train && pip install -r requirements.txt && ./train.sh && ./serve.sh
+```
+
+Then set `LLM_PROVIDER=custom`, `LLM_BASE_URL=http://host.docker.internal:8000/v1`,
+`LLM_MODEL=sleuth-needle`. Needle emits tool calls only — answers come from tool
+output.
+
 ---
 
 ## Tools the model gets
