@@ -1,0 +1,30 @@
+# Needle 2 — tiny tool-calling brain for Sleuth
+#
+# Needle is ~45M params / ~14MB. It is NOT a chat model: it emits tool calls.
+# Fine-tuning teaches it Sleuth's tools and stops "policy refusal" routing so
+# you can skip multi‑GB uncensored chat models for the agent loop.
+#
+# Quickstart (host with Python 3.11+):
+#
+#   pip install cactus-needle needle-openai
+#   cd needle_train && chmod +x train.sh serve.sh
+#   ./train.sh          # builds data/, checkpoints/, dist/sleuth_needle.cact
+#   ./serve.sh          # OpenAI-compatible API on :8000
+#
+# Then in Sleuth `.env` (or compose):
+#
+#   LLM_PROVIDER=custom
+#   LLM_BASE_URL=http://host.docker.internal:8000/v1
+#   LLM_MODEL=sleuth-needle
+#
+# Rebuild / restart the sleuth container after changing .env.
+#
+# Notes
+# -----
+# - Training runs on CPU via JAX; GPU: pip install 'cactus-needle[gpu]'
+# - Expect 10–30 min on a modern CPU for ~200–400 examples × 15 epochs
+# - Final prose answers still come from tool results; Needle picks the tools
+# - For richer chat, keep a small instruct model only for summarising tool output
+
+cactus-needle>=2.0.8
+needle-openai>=0.1.1

@@ -8,3 +8,11 @@ skills/.training/
 apks/*
 !apks/.gitkeep
 !apks/README.md
+needle_train/checkpoints/
+needle_train/data/
+# Keep the exported tuned weights (small); ignore huge base/adapter pickles.
+!needle_train/dist/
+needle_train/dist/*
+!needle_train/dist/sleuth_needle.cact
+!needle_train/dist/.gitkeep
+
