@@ -227,6 +227,69 @@ async def main() -> int:
 
     check("skill_write refuses a built-in tool name",
           "built-in tool name" in _skills.skill_write("research", _code), "")
+
+    _js = (
+        "// Add two integers.\n"
+        "// @param {integer} a\n"
+        "// @param {integer} b\n"
+        "const args = JSON.parse(process.argv[2] || process.env.SLEUTH_ARGS_JSON || '{}');\n"
+        "process.stdout.write(String(Number(args.a) + Number(args.b)));\n"
+    )
+    _js_msg = _skills.skill_write("add_js", _js, language="javascript")
+    check("skill_write authors a javascript skill",
+          "live and callable" in _js_msg and "javascript" in _js_msg.lower(), _js_msg[:200])
+    _js_h = _agent.resolve_handler("add_js")
+    check("javascript skill invokes with JSON args",
+          _js_h is not None and (await _js_h(a=2, b=3)) == "5", "")
+    check("javascript skill is stored as .js",
+          (_skdir / "add_js.js").is_file(), "")
+
+    _sh = (
+        "#!/bin/bash\n"
+        "# Add two integers via env.\n"
+        "# @param {integer} a\n"
+        "# @param {integer} b\n"
+        "echo $(( SLEUTH_ARG_A + SLEUTH_ARG_B ))\n"
+    )
+    _sh_msg = _skills.skill_write("add_sh", _sh, language="bash")
+    check("skill_write authors a bash skill",
+          "live and callable" in _sh_msg and "bash" in _sh_msg.lower(), _sh_msg[:200])
+    _sh_h = _agent.resolve_handler("add_sh")
+    check("bash skill invokes via SLEUTH_ARG_*",
+          _sh_h is not None and (await _sh_h(a=10, b=5)).strip() == "15", "")
+
+    _go = (
+        "package main\n"
+        "import (\n"
+        "  \"encoding/json\"\n"
+        "  \"fmt\"\n"
+        "  \"os\"\n"
+        ")\n"
+        "// @param {integer} a\n"
+        "// @param {integer} b\n"
+        "func main() {\n"
+        "  var args map[string]float64\n"
+        "  json.Unmarshal([]byte(os.Args[1]), &args)\n"
+        "  fmt.Printf(\"%g\", args[\"a\"]+args[\"b\"])\n"
+        "}\n"
+    )
+    _go_msg = _skills.skill_write("add_go", _go, language="go")
+    check("skill_write authors a go skill",
+          "live and callable" in _go_msg and "go" in _go_msg.lower(), _go_msg[:200])
+    _go_h = _agent.resolve_handler("add_go")
+    check("go skill invokes with JSON argv",
+          _go_h is not None and (await _go_h(a=4, b=6)).strip() == "10", "")
+
+    _listed = _skills.skill_list()
+    check("skill_list reports language tags",
+          "[javascript]" in _listed and "[bash]" in _listed, _listed[:400])
+    _read_js = _skills.skill_read("add_js")
+    check("skill_read finds non-python source",
+          "process.argv" in _read_js, _read_js[:120])
+    check("skill_delete removes non-python skill",
+          "Deleted" in _skills.skill_delete("add_js") and not (_skdir / "add_js.js").exists(), "")
+    check("unknown language is refused",
+          "Unknown skill language" in _skills.skill_write("x", "print(1)", language="cobol"), "")
     check("code_read blocks path traversal out of CODE_ROOT",
           "outside CODE_ROOT" in _skills.code_read("../../etc/passwd"), "")
 

@@ -161,9 +161,11 @@ WAPITI_SCOPE = _env("WAPITI_SCOPE", "folder")  # page | folder | domain | url
 WAPITI_MODULES = _env("WAPITI_MODULES")
 
 # --- Self-extension (skills the model writes for itself) ------------------
-# The model can author Python functions into SKILLS_DIR and call them as tools
+# The model can author functions/scripts into SKILLS_DIR and call them as tools
 # on the very next turn, read and patch this package's own source, and execute
-# arbitrary Python or shell. That is a lot of rope: this agent reads untrusted
+# arbitrary Python or shell. Python skills load in-process; other languages
+# (JavaScript, Bash, Ruby, Perl, PHP, Go, Lua, R) run as subprocesses if the
+# interpreter is on PATH. That is a lot of rope: this agent reads untrusted
 # web pages, so a prompt-injected page that talks the model into writing a
 # skill gets arbitrary code execution with this process's environment -- .env
 # API keys included. Each capability has its own kill-switch below so you can

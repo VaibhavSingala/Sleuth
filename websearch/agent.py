@@ -448,9 +448,12 @@ def _is_tool(name: str) -> bool:
 
 SKILLS_PROMPT = (
     "\n- You can extend yourself. If a capability you need does not exist, use "
-    "`skill_write` to author a Python function and it becomes a callable tool "
-    "immediately (list them with `skill_list`). You can also read and edit this "
-    "project's own source (`code_read`/`code_search`/`code_write`) and run code "
+    "`skill_write` to author a tool in Python, JavaScript, Bash, Ruby, Perl, "
+    "PHP, Go, Lua or R — it becomes callable immediately (list them with "
+    "`skill_list`). Python skills are a named function; other languages read "
+    "JSON args from argv/stdin/`SLEUTH_ARGS_JSON` and print the result. You "
+    "can also read and edit this project's own source "
+    "(`code_read`/`code_search`/`code_write`) and run code "
     "(`python_exec`/`shell_exec`). Prefer a small, well-named skill over "
     "repeating ad-hoc `python_exec`."
 )

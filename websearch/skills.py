@@ -2,13 +2,13 @@
 
 This is the subsystem that lets the model extend itself. It can:
 
-- **write a Python function into ``SKILLS_DIR`` and call it as a tool on the
+- **write a function into ``SKILLS_DIR`` and call it as a tool on the
   very next turn** -- ``skill_write`` / ``skill_list`` / ``skill_read`` /
-  ``skill_delete``. A skill file defines a function whose name is the file stem
+  ``skill_delete``. Python skills define a function whose name is the file stem
   (or ``run``); its signature becomes the tool's JSON parameter schema and its
-  docstring the tool description, exactly the way FastMCP derives a tool from a
-  Python function. So the model writes an ordinary function and gets a
-  first-class, immediately-callable tool for free.
+  docstring the tool description. The same tools accept JavaScript, Bash, Ruby,
+  Perl, PHP, Go, Lua and R: those files run in a subprocess and take JSON
+  arguments on argv/stdin.
 - **read and patch this package's own source** -- ``code_read`` /
   ``code_search`` / ``code_write`` / ``code_revert``. Every write is snapshotted
   to ``BACKUP_DIR`` first, and a ``.py`` file that stops parsing is rolled back
@@ -31,6 +31,7 @@ import inspect
 import io
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -40,7 +41,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config
+from . import config, skill_lang
 
 log = logging.getLogger(__name__)
 
@@ -127,11 +128,47 @@ def _signature_str(fn) -> str:
         return "(...)"
 
 
+_JSON_TO_PY = {
+    "string": str, "integer": int, "number": float,
+    "boolean": bool, "array": list, "object": dict,
+}
+
+
+def _bind_schema_signature(fn, schema: dict, name: str):
+    """Give an external skill wrapper a signature FastMCP / inspect can read."""
+    props = (schema or {}).get("properties") or {}
+    required = set((schema or {}).get("required") or [])
+    params: list[inspect.Parameter] = []
+    for pname, spec in props.items():
+        spec = spec if isinstance(spec, dict) else {}
+        json_type = spec.get("type", "string")
+        if isinstance(json_type, list):
+            json_type = json_type[0] if json_type else "string"
+        default = inspect.Parameter.empty
+        if pname not in required or "default" in spec:
+            default = spec.get("default", None)
+        params.append(inspect.Parameter(
+            pname,
+            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            default=default,
+            annotation=_JSON_TO_PY.get(json_type, str),
+        ))
+    try:
+        fn.__signature__ = inspect.Signature(params)
+    except (TypeError, ValueError):
+        pass
+    fn.__name__ = name
+    return fn
+
+
 # --- the skill registry ---------------------------------------------------
 
 
 class Skill:
-    __slots__ = ("name", "path", "fn", "is_async", "schema", "description", "mtime", "error")
+    __slots__ = (
+        "name", "path", "fn", "is_async", "schema", "description",
+        "mtime", "error", "language",
+    )
 
     def __init__(self, name: str, path: Path):
         self.name = name
@@ -142,10 +179,11 @@ class Skill:
         self.description = ""
         self.error: str | None = None
         self.mtime = 0.0
+        self.language = "python"
 
 
 class Registry:
-    """Loads ``*.py`` skill files and keeps them in sync with disk by mtime."""
+    """Loads skill source files and keeps them in sync with disk by mtime."""
 
     def __init__(self, directory: Path):
         self.dir = directory
@@ -156,13 +194,14 @@ class Registry:
             self.skills = {}
             return
         seen: set[str] = set()
-        for path in sorted(self.dir.glob("*.py")):
-            if path.name.startswith("_"):
-                continue
+        for path in skill_lang.iter_skill_sources(self.dir):
             name = path.stem
             seen.add(name)
             try:
                 mtime = path.stat().st_mtime
+                meta = skill_lang.meta_path(self.dir, name)
+                if meta.is_file():
+                    mtime = max(mtime, meta.stat().st_mtime)
             except OSError:
                 continue
             existing = self.skills.get(name)
@@ -174,6 +213,28 @@ class Registry:
     def _load(self, name: str, path: Path, mtime: float) -> Skill:
         skill = Skill(name, path)
         skill.mtime = mtime
+        meta = skill_lang.read_meta(self.dir, name)
+        language = meta.get("language") or skill_lang.language_for_ext(path.suffix) or "python"
+        try:
+            language = skill_lang.normalize_language(language) or "python"
+        except ValueError:
+            language = "python"
+        skill.language = language
+        lang = skill_lang.LANGUAGES[language]
+        if lang.in_process:
+            return self._load_python(skill, name, path, meta)
+        return self._load_external(skill, name, path, lang, meta)
+
+    def _apply_meta(self, skill: Skill, meta: dict, fallback_desc: str) -> None:
+        if meta.get("description"):
+            skill.description = meta["description"]
+        elif not skill.description:
+            skill.description = fallback_desc
+        schema = meta.get("schema")
+        if isinstance(schema, dict) and schema.get("properties"):
+            skill.schema = schema
+
+    def _load_python(self, skill: Skill, name: str, path: Path, meta: dict) -> Skill:
         modname = f"websearch._skills.{name}"
         try:
             spec = importlib.util.spec_from_file_location(modname, path)
@@ -195,6 +256,32 @@ class Registry:
         skill.is_async = inspect.iscoroutinefunction(fn)
         skill.schema = _schema_from_fn(fn)
         skill.description = _first_paragraph(fn.__doc__) or f"Skill '{name}'."
+        self._apply_meta(skill, meta, skill.description)
+        return skill
+
+    def _load_external(
+        self, skill: Skill, name: str, path: Path, lang: skill_lang.Language, meta: dict
+    ) -> Skill:
+        if not lang.available():
+            skill.error = (
+                f"{lang.name} interpreter '{lang.argv[0]}' is not installed; "
+                "install it or rewrite the skill in python."
+            )
+            return skill
+        try:
+            code = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            skill.error = f"could not read {path}: {exc}"
+            return skill
+        comment_desc, comment_schema = skill_lang.schema_from_comments(code)
+        skill.schema = comment_schema
+        skill.description = comment_desc or f"Skill '{name}' ({lang.name})."
+        self._apply_meta(skill, meta, skill.description)
+        fn = skill_lang.make_external_fn(name, path, lang)
+        _bind_schema_signature(fn, skill.schema, name)
+        fn.__doc__ = skill.description
+        skill.fn = fn
+        skill.is_async = False
         return skill
 
     def valid(self) -> list[Skill]:
@@ -261,28 +348,79 @@ def _bad_name(name: str) -> str | None:
     return None
 
 
-def skill_write(name: str, code: str, description: str = "") -> str:
+def skill_write(
+    name: str,
+    code: str,
+    description: str = "",
+    language: str = "auto",
+    parameters: str = "",
+) -> str:
     """Create or replace a skill and register it as a callable tool.
 
-    `code` is the full Python source of a file that defines a function named
-    `name` (or `run`). That function becomes the tool: its parameters become the
-    tool's arguments and its docstring the tool description.
+    `code` is the full source. For Python, define a function named `name` (or
+    `run`); its parameters become the tool's arguments and its docstring the
+    description. For other languages (`javascript`, `bash`, `ruby`, `perl`,
+    `php`, `go`, `lua`, `r`) the file is run as a subprocess. Pass arguments as
+    JSON on argv[1], stdin, `SLEUTH_ARGS_JSON`, or `SLEUTH_ARG_<NAME>`, and
+    print the result to stdout.
+
+    `language` is `auto` (detect from shebang/source), or an explicit name.
+    `parameters` is optional JSON describing the tool args when they cannot be
+    inferred (`{"f": "number"}` or a full schema with `properties`).
     """
     if not config.SKILLS_ENABLED:
         return "Skills are disabled (SLEUTH_SKILLS=false)."
     bad = _bad_name(name)
     if bad:
         return bad
+    try:
+        lang_name = skill_lang.detect_language(code, hint=language)
+        schema_override = skill_lang.schema_from_parameters(parameters)
+    except ValueError as exc:
+        return str(exc)
+    lang = skill_lang.LANGUAGES[lang_name]
     config.SKILLS_DIR.mkdir(parents=True, exist_ok=True)
-    path = config.SKILLS_DIR / f"{name}.py"
+    path = config.SKILLS_DIR / f"{name}{lang.ext}"
+    if lang.in_process:
+        try:
+            compile(code, str(path), "exec")
+        except SyntaxError as exc:
+            return f"Skill not saved -- syntax error: {exc}"
     try:
-        compile(code, str(path), "exec")
-    except SyntaxError as exc:
-        return f"Skill not saved -- syntax error: {exc}"
-    try:
-        path.write_text(code, encoding="utf-8")
+        staging = path.with_name(f".{path.name}.staging")
+        skill_lang.write_atomic(staging, code)
     except OSError as exc:
         return f"Could not write skill file: {exc}"
+    syntax_err = skill_lang.syntax_check(lang, staging)
+    if syntax_err:
+        try:
+            staging.unlink()
+        except OSError:
+            pass
+        return f"Skill not saved -- syntax error: {syntax_err}"
+    try:
+        os.replace(staging, path)
+    except OSError as exc:
+        try:
+            staging.unlink()
+        except OSError:
+            pass
+        return f"Could not write skill file: {exc}"
+    skill_lang.remove_skill_files(config.SKILLS_DIR, name, keep=path)
+
+    comment_desc, comment_schema = skill_lang.schema_from_comments(code)
+    meta: dict = {"language": lang_name}
+    if description.strip():
+        meta["description"] = description.strip()
+    elif comment_desc:
+        meta["description"] = comment_desc
+    schema = schema_override or (comment_schema if comment_schema.get("properties") else None)
+    if schema:
+        meta["schema"] = schema
+    if not lang.in_process or description.strip() or schema_override:
+        skill_lang.write_meta(config.SKILLS_DIR, name, meta)
+    else:
+        skill_lang.write_meta(config.SKILLS_DIR, name, {})
 
     REGISTRY.skills.pop(name, None)  # force a reload of this stem
     REGISTRY.refresh()
@@ -296,6 +434,8 @@ def skill_write(name: str, code: str, description: str = "") -> str:
         )
     return (
         f"Skill '{name}' is live and callable now.\n"
+        f"Language: {skill.language}\n"
+        f"File: {path.name}\n"
         f"Signature: {name}{_signature_str(skill.fn)}\n"
         f"Description: {skill.description}\n"
         f"Parameters: {json.dumps(skill.schema.get('properties', {}))}"
@@ -312,10 +452,15 @@ def skill_list() -> str:
     lines = [f"Skills in {config.SKILLS_DIR}:", ""]
     for name in sorted(REGISTRY.skills):
         skill = REGISTRY.skills[name]
+        lang = getattr(skill, "language", "python")
         if skill.error:
-            lines.append(f"- {name}  [BROKEN] {skill.error.splitlines()[-1][:80]}")
+            lines.append(
+                f"- {name} [{lang}]  [BROKEN] {skill.error.splitlines()[-1][:80]}"
+            )
         else:
-            lines.append(f"- {name}{_signature_str(skill.fn)} — {skill.description}")
+            lines.append(
+                f"- {name}{_signature_str(skill.fn)} [{lang}] — {skill.description}"
+            )
     return "\n".join(lines)
 
 
@@ -336,6 +481,7 @@ def skill_catalog() -> list[dict]:
         catalog.append({
             "name": name,
             "description": skill.description or f"Skill '{name}'.",
+            "language": getattr(skill, "language", "python"),
             "ok": skill.error is None and skill.fn is not None,
             "parameters": params,
             "example": example,
@@ -346,22 +492,23 @@ def skill_catalog() -> list[dict]:
 
 def skill_read(name: str) -> str:
     """Return the full source of an authored skill so it can be edited."""
-    path = config.SKILLS_DIR / f"{name}.py"
-    if not path.is_file():
+    path = skill_lang.find_skill_source(config.SKILLS_DIR, name)
+    if path is None or not path.is_file():
         return f"No skill named '{name}'. Use skill_list to see what exists."
     try:
-        return f"# {path}\n\n{path.read_text(encoding='utf-8')}"
+        lang = skill_lang.language_for_ext(path.suffix) or "python"
+        return f"# {path} ({lang})\n\n{path.read_text(encoding='utf-8')}"
     except OSError as exc:
         return f"Could not read skill: {exc}"
 
 
 def skill_delete(name: str) -> str:
     """Delete an authored skill by name."""
-    path = config.SKILLS_DIR / f"{name}.py"
-    if not path.is_file():
+    path = skill_lang.find_skill_source(config.SKILLS_DIR, name)
+    if path is None or not path.is_file():
         return f"No skill named '{name}'."
     try:
-        path.unlink()
+        skill_lang.remove_skill_files(config.SKILLS_DIR, name)
     except OSError as exc:
         return f"Could not delete skill: {exc}"
     REGISTRY.skills.pop(name, None)
@@ -590,11 +737,13 @@ _META_SCHEMAS: list[dict] = [
     {
         "name": "skill_write", "group": "skills",
         "description": (
-            "Author a new tool for yourself: write a Python file defining a "
-            "function (named the same as the skill, or `run`) and it becomes a "
-            "callable tool immediately. The function's parameters become the "
-            "tool's arguments; its docstring becomes the description. Use this "
-            "when a capability you need doesn't exist yet."
+            "Author a new tool for yourself in Python, JavaScript, Bash, Ruby, "
+            "Perl, PHP, Go, Lua or R. Python: define a function named the same "
+            "as the skill (or `run`); its parameters become the tool arguments "
+            "and its docstring the description. Other languages run as a "
+            "subprocess — read JSON args from argv[1] / stdin / SLEUTH_ARGS_JSON "
+            "/ SLEUTH_ARG_<NAME> and print the result to stdout. Use this when a "
+            "capability you need doesn't exist yet."
         ),
         "parameters": {
             "type": "object",
@@ -602,9 +751,14 @@ _META_SCHEMAS: list[dict] = [
                 "name": {"type": "string",
                          "description": "lower_snake_case tool name (also the file stem)."},
                 "code": {"type": "string",
-                         "description": "Full Python source defining the entry function."},
+                         "description": "Full source of the skill."},
                 "description": {"type": "string",
-                                "description": "Optional human summary (the docstring is used if omitted)."},
+                                "description": "Optional human summary (docstring / @param comments used if omitted)."},
+                "language": {"type": "string",
+                             "description": "python, javascript, bash, ruby, perl, php, go, lua, r, or auto to detect.",
+                             "default": "auto"},
+                "parameters": {"type": "string",
+                               "description": "Optional JSON object of tool args, e.g. {\"f\":\"number\"}, when they cannot be inferred."},
             },
             "required": ["name", "code"],
         },
@@ -807,9 +961,13 @@ def _cli() -> int:
     sub.add_parser("list", help="List authored skills.")
     p_read = sub.add_parser("read", help="Print a skill's source.")
     p_read.add_argument("name")
-    p_new = sub.add_parser("write", help="Create a skill from a .py file on disk.")
+    p_new = sub.add_parser("write", help="Create a skill from a source file on disk.")
     p_new.add_argument("name")
-    p_new.add_argument("file", help="Path to a .py file with the skill's code.")
+    p_new.add_argument("file", help="Path to the skill source (extension selects language).")
+    p_new.add_argument("--language", default="auto",
+                       help="python/javascript/bash/... or auto (default: from file extension).")
+    p_new.add_argument("--parameters", default="",
+                       help="JSON object describing tool arguments.")
     p_del = sub.add_parser("delete", help="Delete a skill.")
     p_del.add_argument("name")
     p_run = sub.add_parser("call", help="Invoke a skill with JSON arguments.")
@@ -832,7 +990,11 @@ def _cli() -> int:
         except OSError as exc:
             print(f"Could not read {args.file}: {exc}", file=sys.stderr)
             return 1
-        print(skill_write(args.name, code))
+        hint = args.language
+        if hint in ("auto", "", None):
+            from . import skill_lang as _sl
+            hint = _sl.language_for_ext(Path(args.file).suffix) or "auto"
+        print(skill_write(args.name, code, language=hint, parameters=args.parameters))
         return 0
     if args.cmd == "delete":
         print(skill_delete(args.name))

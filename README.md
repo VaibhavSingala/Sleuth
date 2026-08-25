@@ -43,7 +43,7 @@ output.
 | `burp_scan` / `burp_scan_status` | Starts/reads an active Burp scan (Pro, gated) | Authorised active vulnerability testing |
 | `zap_feed` / `zap_alerts` | Feed recon through ZAP, read its alerts (free) | Authorised testing with OWASP ZAP |
 | `zap_scan` / `zap_scan_status` | Spider + active ZAP scan (free scanner, gated) | Authorised active testing without Burp Pro |
-| `skill_write` / `skill_list` / `skill_read` / `skill_delete` | The model authors a Python function and it becomes a callable tool immediately | A capability it needs doesn't exist yet ([self-extension](#self-extension--the-model-writes-its-own-tools)) |
+| `skill_write` / `skill_list` / `skill_read` / `skill_delete` | The model authors a function or script (Python, JavaScript, Bash, Ruby, Perl, PHP, Go, Lua, R) and it becomes a callable tool immediately | A capability it needs doesn't exist yet ([self-extension](#self-extension--the-model-writes-its-own-tools)) |
 | `code_read` / `code_search` / `code_write` / `code_revert` | Read and patch this project's own source, every write snapshotted and auto-reverted if it stops parsing | The model improving or fixing its own tooling |
 | `python_exec` / `shell_exec` | Run Python in-process or a shell command | Trying out a skill it just wrote, one-off computation |
 | `clear_web_cache` | Drops cached results, forcing a refetch | Rarely; when you need guaranteed-fresh data |
@@ -287,14 +287,17 @@ is a free app with a proxy + scanner; **Burp** needs Pro for its scanner API.
 
 Every other tool here is one *you* shipped. This one lets the **model add its
 own** at runtime: when it hits a task no existing tool covers, it writes a
-Python function, and that function becomes a first-class tool it can call on the
+function or script, and that becomes a first-class tool it can call on the
 very next turn — no restart, no code change from you.
 
-A skill is just a `.py` file in `skills/` that defines a function named after
-the file (or `run`). Its **signature becomes the tool's arguments** and its
-**docstring the description**, the same way the MCP tools are derived from
-Python functions — so the model writes ordinary code and gets a typed tool for
-free. Author it in chat:
+**Python** skills are a `.py` file in `skills/` that defines a function named
+after the file (or `run`). Its **signature becomes the tool's arguments** and
+its **docstring the description**. **Other languages** (JavaScript, Bash, Ruby,
+Perl, PHP, Go, Lua, R) are stored with the matching extension and run as a
+subprocess: they receive arguments as JSON (`argv[1]`, stdin, `SLEUTH_ARGS_JSON`,
+or `SLEUTH_ARG_<NAME>`) and print the result to stdout. Declare args with
+`@param {number} f` comments or the `parameters` argument to `skill_write`.
+Author it in chat:
 
 > **you:** convert 100°F to Celsius and remember how — I'll ask again
 >
@@ -305,7 +308,7 @@ From then on `f_to_c` shows up in the tool list like any built-in.
 
 | Tool | What it does |
 |---|---|
-| `skill_write(name, code)` | Save a function as a new tool; it's validated and registered immediately |
+| `skill_write(name, code, language="auto")` | Save a function/script as a new tool; it's validated and registered immediately |
 | `skill_list` / `skill_read` / `skill_delete` | Inspect and manage authored skills |
 | `code_read` / `code_search` | Read (with line numbers) and regex-search this project's own source |
 | `code_write(path, content)` | Patch a source file — snapshotted first, and **auto-reverted if the new Python no longer parses** so a bad edit can't take the process down |

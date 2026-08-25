@@ -3,29 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import inspect
 import json
 from typing import Any
 
-from . import config, skills
+from . import skills
 from .analyze import analyze_site, compare_sites
 
 
 def _load_skill(name: str):
-    """Load a skill function from ``skills/`` if the file exists."""
-    path = config.SKILLS_DIR / f"{name}.py"
-    if not path.is_file():
+    """Load a skill callable from the registry if it exists."""
+    skills.refresh()
+    skill = skills.REGISTRY.skills.get(name)
+    if skill is None or skill.error or skill.fn is None:
         return None
-    modname = f"websearch._composite.{name}"
-    try:
-        spec = importlib.util.spec_from_file_location(modname, path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
-        fn = getattr(module, name, None) or getattr(module, "run", None)
-        return fn if callable(fn) else None
-    except Exception:
-        return None
+    return skill.fn
 
 
 async def _run_skill(name: str, **kwargs) -> Any | None:

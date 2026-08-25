@@ -71,6 +71,7 @@
   .skill-item.ok{border-left-color:var(--glow)}
   .skill-item.broken{border-left-color:var(--red);opacity:.6}
   .skill-item .nm{color:var(--cyan)}
+  .skill-item .lang{color:var(--muted);font-size:9px;margin-left:6px;text-transform:uppercase}
   .skill-item .desc{color:var(--muted);margin-top:2px}
   .empty{color:var(--muted);padding:8px;font-size:11px}
   /* center terminal */
@@ -474,7 +475,7 @@ async function loadSkills(){
     const items=j.skills||[];
     if(!items.length){list.innerHTML='<div class="empty">arsenal empty — skill_write to arm</div>';return;}
     list.innerHTML=items.map(s=>'<div class="skill-item '+(s.ok?'ok':'broken')+'">'+
-      '<div class="nm">'+esc(s.name)+'</div><div class="desc">'+esc(s.description)+'</div></div>').join('');
+      '<div class="nm">'+esc(s.name)+'<span class="lang">'+esc(s.language||'python')+'</span></div><div class="desc">'+esc(s.description)+'</div></div>').join('');
     feed('arsenal loaded :: '+items.length+' skills','ok');
   }catch(e){$('skillsList').innerHTML='<div class="empty">arsenal scan failed</div>';}
 }
