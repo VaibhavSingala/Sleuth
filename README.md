@@ -10,6 +10,9 @@ for Ollama, which has no MCP client of its own).
 
 Works out of the box with **no API keys** — DuckDuckGo is the default backend.
 
+Where to add the next layer of logic (memory, planning, finding correlation,
+skill tests) is spelled out in [`ROADMAP.md`](ROADMAP.md).
+
 ### Tiny model option — Needle 2
 
 Want to skip multi‑GB “uncensored” chat models? Fine-tune
