@@ -218,21 +218,37 @@ def schema_from_comments(code: str) -> tuple[str, dict]:
     props: dict = {}
     required: list[str] = []
     for raw_line in code.splitlines()[:80]:
-        line = raw_line.strip().lstrip("#/*").strip()
+        stripped = raw_line.strip()
+        if stripped.startswith("#!"):
+            continue
+        is_comment = (
+            stripped.startswith("#")
+            or stripped.startswith("//")
+            or stripped.startswith("/*")
+            or stripped.startswith("*")
+        )
+        line = stripped.lstrip("#/*").strip().lstrip("*").strip()
+        if not line:
+            continue
+        match = _PARAM_RE.search(raw_line)
+        if match:
+            name = match.group("name")
+            type_name = match.group("jstype") or match.group("colontype") or "string"
+            spec: dict = {"type": json_type(type_name)}
+            default = match.group("default")
+            if default is not None:
+                spec["default"] = _literal(default)
+            else:
+                required.append(name)
+            props[name] = spec
+            continue
+        if not is_comment:
+            continue
         if line.lower().startswith("@skill "):
             description = description or line[7:].strip()
-        match = _PARAM_RE.search(raw_line)
-        if not match:
             continue
-        name = match.group("name")
-        type_name = match.group("jstype") or match.group("colontype") or "string"
-        spec: dict = {"type": json_type(type_name)}
-        default = match.group("default")
-        if default is not None:
-            spec["default"] = _literal(default)
-        else:
-            required.append(name)
-        props[name] = spec
+        if not description and not line.startswith("@"):
+            description = line
     schema: dict = {"type": "object", "properties": props}
     if required:
         schema["required"] = required

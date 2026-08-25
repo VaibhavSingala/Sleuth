@@ -387,7 +387,7 @@ def skill_write(
         except SyntaxError as exc:
             return f"Skill not saved -- syntax error: {exc}"
     try:
-        staging = path.with_name(f".{path.name}.staging")
+        staging = path.with_name(f".{path.stem}.staging{path.suffix}")
         skill_lang.write_atomic(staging, code)
     except OSError as exc:
         return f"Could not write skill file: {exc}"
