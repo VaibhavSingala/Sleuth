@@ -175,8 +175,9 @@ SKILLS_DIR = Path(_env("SLEUTH_SKILLS_DIR", str(PROJECT_ROOT / "skills")))
 
 # Editing the package's own source. CODE_ROOT bounds what the code_* tools may
 # reach; point it elsewhere to work on another tree, or narrow it to sandbox
-# the model into a subdirectory.
-CODE_EDIT_ENABLED = _env_bool("SLEUTH_ALLOW_SELF_EDIT", True)
+# the model into a subdirectory. Default off so a public clone cannot rewrite
+# the project until the operator opts in.
+CODE_EDIT_ENABLED = _env_bool("SLEUTH_ALLOW_SELF_EDIT", False)
 CODE_ROOT = Path(_env("SLEUTH_CODE_ROOT", str(PROJECT_ROOT)))
 
 # Every write is snapshotted first, so code_revert can undo a bad edit and a
@@ -184,12 +185,24 @@ CODE_ROOT = Path(_env("SLEUTH_CODE_ROOT", str(PROJECT_ROOT)))
 BACKUP_DIR = Path(_env("SLEUTH_BACKUP_DIR", str(PROJECT_ROOT / ".backups")))
 BACKUP_KEEP = _env_int("SLEUTH_BACKUP_KEEP", 20)
 
-# Arbitrary execution. python_exec runs in-process against the live package
-# (that is the point -- it can call what it just wrote); shell_exec spawns a
-# subprocess, so its timeout is the only one that can actually kill the work.
-EXEC_ENABLED = _env_bool("SLEUTH_ALLOW_EXEC", True)
+# Arbitrary execution. Default off for public clones. python_exec runs
+# in-process against the live package; shell_exec spawns a subprocess.
+EXEC_ENABLED = _env_bool("SLEUTH_ALLOW_EXEC", False)
 EXEC_TIMEOUT = _env_float("SLEUTH_EXEC_TIMEOUT", 30.0)
 SKILL_TIMEOUT = _env_float("SLEUTH_SKILL_TIMEOUT", 60.0)
+
+# Intrusive skills (brute force, XSS injection, dir busting, composite active
+# checks). Same idea as ZAP_ALLOW_ACTIVE_SCAN: the files stay in the repo for
+# authorised lab use, but they are not registered as tools until this is true.
+ACTIVE_SKILLS_ENABLED = _env_bool("SLEUTH_ALLOW_ACTIVE_SKILLS", False)
+ACTIVE_SKILL_NAMES = frozenset({
+    "brute_force_login",
+    "xss_payload_injection",
+    "directory_bruteforce",
+    "comprehensive_vulnerability_check",
+    "check_xss_reflection",
+    "check_common_vectors",
+})
 
 # Auto-review (Cursor-style): allow target-directed work, block host damage.
 # Built-in recon/scanner tools skip the classifier. python_exec / shell_exec /

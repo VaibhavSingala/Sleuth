@@ -80,5 +80,5 @@ def check_ssl_config(url: str):
 # Example usage (will be called by the tool runner)
 if __name__ == '__main__':
     check_ssl_config("https://www.google.com") # Test with a known good site
-    # check_ssl_config("http://xpanle.xyz/")     # Test with the user's target site
+    # check_ssl_config("https://example.com/")
 

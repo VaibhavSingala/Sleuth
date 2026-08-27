@@ -6,11 +6,10 @@ call tools.
 
 ## What “uncensored” means here
 
-Needle does not chat. It only emits tool calls. The LoRA dataset trains it to:
-
-1. Route authorised recon / APK / vuln-research prompts to Sleuth tools
-2. **Never refuse** those calls with policy text
-3. Return `answers: []` on small talk so it does not spam tools
+Needle does not chat. It only emits tool calls. The LoRA dataset trains it to
+route **authorised** recon / APK / vuln-research prompts to Sleuth tools, and
+not to answer those prompts with a policy refusal. It is **not** a jailbreak
+pack and must not be used against systems you do not have permission to test.
 
 ## Train
 

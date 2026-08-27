@@ -194,6 +194,17 @@ async def main() -> int:
         "zap_feed", "zap_alerts", "zap_scan", "zap_scan_status", "wapiti_scan",
     }
     check("MCP server exposes tools", expected <= tools, f"found: {sorted(tools)}")
+    check("MCP keeps python_exec off until opted in",
+          "python_exec" not in tools, "")
+
+    from websearch import skills as _skills0
+    _skills0.refresh()
+    _loaded0 = set(_skills0.skill_handlers())
+    check(
+        "intrusive skills stay unloaded by default",
+        not ({"brute_force_login", "xss_payload_injection", "directory_bruteforce"} & _loaded0),
+        str(sorted(_loaded0)),
+    )
 
     # 13. Self-extension: authored skills, code self-editing, execution.
     # Runs entirely in a temp dir so it never touches real source (offline).
@@ -360,8 +371,8 @@ async def main() -> int:
           "Blocked by auto-review" in _skills.code_write("websearch/auto_review.py", "# no\n"), "")
     check("python_exec runs against the live package",
           "45" in await _skills.python_exec("result = sum(range(10))"), "")
-    check("MCP server exposes the self-extension tools",
-          {"skill_write", "skill_call", "code_write", "python_exec"} <= tools, "")
+    check("MCP server exposes skill_write without requiring exec",
+          {"skill_write", "skill_call"} <= tools, "")
 
     _shutil.rmtree(_skdir, ignore_errors=True)
 

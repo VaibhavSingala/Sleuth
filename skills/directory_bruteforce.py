@@ -1,3 +1,4 @@
+import os
 import requests
 from typing import Optional
 
@@ -17,6 +18,8 @@ def directory_bruteforce(url: str, wordlist_path: str, timeout: int = 5) -> dict
         A dictionary containing 'found_paths' (list of successful paths) 
         and 'total_tested' (integer count).
     """
+    if os.environ.get("SLEUTH_ALLOW_ACTIVE_SKILLS", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return {"ok": False, "error": "Skill 'directory_bruteforce' is disabled. Set SLEUTH_ALLOW_ACTIVE_SKILLS=true in .env for authorised targets only.", "found_paths": [], "total_tested": 0}
     try:
         with open(wordlist_path, 'r') as f:
             words = [line.strip() for line in f if line.strip()]
@@ -63,7 +66,7 @@ def directory_bruteforce(url: str, wordlist_path: str, timeout: int = 5) -> dict
 
 if __name__ == '__main__':
     # --- Example Usage ---
-    TARGET_URL = "http://xpanle.xyz/"  # Change this to your target site
+    TARGET_URL = "https://example.com"  # Authorised lab target only
     WORDLIST_FILE = "common.txt"     # Ensure you have a wordlist named common.txt in the project root
 
     print(f"--- Running Directory Brute-Force Example ---")

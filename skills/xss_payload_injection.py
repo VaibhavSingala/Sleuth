@@ -1,7 +1,10 @@
+import os
 import requests
 
 def xss_payload_injection(url: str, payload: str) -> dict:
     """Specifically injects a given XSS payload into the root path and reports if it executes or is reflected."""
+    if os.environ.get("SLEUTH_ALLOW_ACTIVE_SKILLS", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return {"ok": False, "error": "Skill 'xss_payload_injection' is disabled. Set SLEUTH_ALLOW_ACTIVE_SKILLS=true in .env for authorised targets only."}
     # Injecting into the query parameter 'q' as a common test vector. Adjust if needed.
     test_url = f"{url}?q={payload}"
     try:

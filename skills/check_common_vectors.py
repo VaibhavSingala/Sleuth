@@ -10,7 +10,11 @@ def check_common_vectors(url: str) -> dict:
     Returns:
         A dictionary containing the results of each test.
     """
+    import os
     import requests
+
+    if os.environ.get("SLEUTH_ALLOW_ACTIVE_SKILLS", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return {"ok": False, "error": "Skill 'check_common_vectors' is disabled. Set SLEUTH_ALLOW_ACTIVE_SKILLS=true in .env for authorised targets only."}
 
     results = {}
     base_url = url.rstrip('/')

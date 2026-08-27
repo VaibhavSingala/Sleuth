@@ -196,6 +196,8 @@ class Registry:
         seen: set[str] = set()
         for path in skill_lang.iter_skill_sources(self.dir):
             name = path.stem
+            if not config.ACTIVE_SKILLS_ENABLED and name in config.ACTIVE_SKILL_NAMES:
+                continue
             seen.add(name)
             try:
                 mtime = path.stat().st_mtime
