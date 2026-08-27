@@ -33,7 +33,8 @@ services:
       # source (/app). With ./websearch bind-mounted below, self-edits land on
       # the host source. These override whatever .env sets.
       SLEUTH_CODE_ROOT: "/app"
-      SLEUTH_ALLOW_EXEC: "true"
+      # Lab-only: python_exec / shell_exec. Leave unset (off) for a public clone.
+      # SLEUTH_ALLOW_EXEC: "true"
       # ADB client in this container → host adb server (emulator/AVD on the host).
       # On the host run: adb kill-server && adb -a nodaemon server start
       SLEUTH_ADB_HOST: "host.docker.internal"

@@ -1,5 +1,9 @@
 # websearch — live web access for your local LLM
 
+**Authorised use only.** Use Sleuth on systems you own or have written
+permission to test. Unauthorised scanning, brute force, or exploitation can
+be illegal. See [SECURITY.md](SECURITY.md).
+
 Gives a local model (LM Studio or Ollama) the ability to search the web and
 news, read pages and PDFs, and profile or compare websites — answering from
 what it actually read instead of from stale weights.
@@ -351,14 +355,15 @@ injects the model can get it to author a skill that reads your `.env`, and that
 skill runs in-process with your API keys. Treat it like giving the model a
 shell.
 
-Each capability has an independent kill-switch (all default **on**; flip any to
-`false` in `.env`):
+Each capability has an independent kill-switch. **Public-clone defaults keep
+exec, self-edit, and intrusive skills off.** Opt in via `.env` for a lab:
 
-| Variable | Turns off |
+| Variable | Turns off / on |
 |---|---|
 | `SLEUTH_SKILLS=false` | The whole subsystem — no skills, no code tools, no exec |
-| `SLEUTH_ALLOW_SELF_EDIT=false` | `code_write` / `code_revert` (reads still allowed) |
-| `SLEUTH_ALLOW_EXEC=false` | `python_exec` / `shell_exec` |
+| `SLEUTH_ALLOW_SELF_EDIT=true` | `code_write` / `code_revert` (default **off**) |
+| `SLEUTH_ALLOW_EXEC=true` | `python_exec` / `shell_exec` (default **off**) |
+| `SLEUTH_ALLOW_ACTIVE_SKILLS=true` | Brute-force, XSS injection, directory busting, and related shipped skills (default **off**) |
 | `SLEUTH_AUTO_REVIEW=false` | Turns off the host-vs-target classifier (not recommended) |
 | `SLEUTH_CODE_ROOT=<path>` | Confines the `code_*` tools to a subtree (traversal outside is refused) |
 
@@ -587,8 +592,9 @@ call.
 | `BURP_API_URL` | `http://127.0.0.1:1337` | Burp Pro REST API base |
 | `BURP_ALLOW_ACTIVE_SCAN` | `false` | Must be `true` to start active scans |
 | `SLEUTH_SKILLS` | `true` | Master switch for [self-extension](#self-extension--the-model-writes-its-own-tools) (authored skills, code tools, exec) |
-| `SLEUTH_ALLOW_SELF_EDIT` | `true` | Allow `code_write` / `code_revert` on the project's own source |
-| `SLEUTH_ALLOW_EXEC` | `true` | Allow `python_exec` / `shell_exec` |
+| `SLEUTH_ALLOW_SELF_EDIT` | `false` | Allow `code_write` / `code_revert` on the project's own source |
+| `SLEUTH_ALLOW_EXEC` | `false` | Allow `python_exec` / `shell_exec` |
+| `SLEUTH_ALLOW_ACTIVE_SKILLS` | `false` | Load brute-force / XSS-injection / dir-bust skills (authorised lab only) |
 | `SLEUTH_AUTO_REVIEW` | `true` | Block host-damaging exec; allow target-directed work ([auto-review](#auto-review--host-vs-target)) |
 | `SLEUTH_CODE_ROOT` | project root | Confine the `code_*` tools to this subtree |
 
@@ -612,9 +618,9 @@ Turn it off only if you specifically need to read pages on your own network,
 and understand that you're removing that backstop.
 
 Two related things the design assumes: search results and page text are **data,
-not instructions**, and nothing here can write files, run commands, or POST
-anywhere. The blast radius of a page trying something clever is limited to
-putting junk in one answer.
+not instructions**. With the public defaults, fetched pages cannot enable
+`python_exec` / `shell_exec` or rewrite this repo. Opting those flags on
+widens the blast radius — treat that like giving the model a shell.
 
 One caveat with `WEBSEARCH_JS_RENDER`: a headless browser executes the page's
 JavaScript, so the private-address guard (which is checked before the initial

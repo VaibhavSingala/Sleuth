@@ -205,7 +205,7 @@ def zap_exploit_rce(target_url: str) -> dict:
     analyzes the results to confirm the presence of a Spring4Shell RCE exploit.
 
     Args:
-        target_url: The base URL to attack (e.g., "http://xpanle.xyz/").
+        target_url: The base URL to attack (e.g., "https://example.com/").
 
     Returns:
         A dictionary containing the scan status, findings, and exploitation verdict.

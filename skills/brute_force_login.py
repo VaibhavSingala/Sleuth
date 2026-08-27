@@ -1,7 +1,10 @@
+import os
 import requests
 
 def brute_force_login(url: str, username: str, password: str) -> dict:
     """Attempts a login on the specified URL using provided credentials and returns success/failure."""
+    if os.environ.get("SLEUTH_ALLOW_ACTIVE_SKILLS", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return {"ok": False, "error": "Skill 'brute_force_login' is disabled. Set SLEUTH_ALLOW_ACTIVE_SKILLS=true in .env for authorised targets only."}
     # Assuming a standard POST request to a /login endpoint. Adjust 'login' if necessary.
     login_endpoint = f"{url}/login" 
     payload = {

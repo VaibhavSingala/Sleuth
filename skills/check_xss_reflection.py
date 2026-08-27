@@ -1,5 +1,5 @@
 from typing import Optional
-# Assuming xss_payload_injection is available in the global scope (ws)
+import os
 
 def check_xss_reflection(url: str, payload: str) -> dict:
     """
@@ -13,6 +13,8 @@ def check_xss_reflection(url: str, payload: str) -> dict:
     Returns:
         A dictionary containing the results from the xss_payload_injection tool call.
     """
+    if os.environ.get("SLEUTH_ALLOW_ACTIVE_SKILLS", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return {"ok": False, "error": "Skill 'check_xss_reflection' is disabled. Set SLEUTH_ALLOW_ACTIVE_SKILLS=true in .env for authorised targets only."}
     try:
         # Call the existing tool with the provided arguments
         result = ws.xss_payload_injection(url=url, payload=payload)
@@ -22,7 +24,7 @@ def check_xss_reflection(url: str, payload: str) -> dict:
 
 # Example usage (optional, but good for testing):
 if __name__ == '__main__':
-    test_url = "http://xpanle.xyz/"
+    test_url = "https://example.com"
     test_payload = "<script>alert('XSS')</script>"
     print(f"--- Testing XSS Reflection on {test_url} with payload: {test_payload} ---")
     result = check_xss_reflection(test_url, test_payload)
