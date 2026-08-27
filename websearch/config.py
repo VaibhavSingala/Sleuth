@@ -191,6 +191,13 @@ EXEC_ENABLED = _env_bool("SLEUTH_ALLOW_EXEC", True)
 EXEC_TIMEOUT = _env_float("SLEUTH_EXEC_TIMEOUT", 30.0)
 SKILL_TIMEOUT = _env_float("SLEUTH_SKILL_TIMEOUT", 60.0)
 
+# Auto-review (Cursor-style): allow target-directed work, block host damage.
+# Built-in recon/scanner tools skip the classifier. python_exec / shell_exec /
+# skill_write / authored skills / code_write are scanned. ssh/adb to a remote
+# host counts as the target. Set false to disable (not recommended).
+AUTO_REVIEW = _env_bool("SLEUTH_AUTO_REVIEW", True)
+AUTO_REVIEW_LOCAL_HOSTS = _env("SLEUTH_AUTO_REVIEW_LOCAL_HOSTS")
+
 # --- Cache ----------------------------------------------------------------
 CACHE_ENABLED = _env_bool("WEBSEARCH_CACHE", True)
 CACHE_DIR = Path(_env("WEBSEARCH_CACHE_DIR", str(PROJECT_ROOT / ".cache")))

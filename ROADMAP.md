@@ -147,9 +147,11 @@ These are small and unblock everything else:
   `selftest.py` on a fresh install.
 - **CI**: run the offline slice of `selftest.py` (skills, schema/signature
   match, path traversal) without live DuckDuckGo.
-- **Sandbox**: `python_exec` / non-Python skills currently share the host
-  process/env. Optional `SLEUTH_SKILL_SANDBOX=bwrap|docker` later; until
-  then, keep the kill-switches obvious in the UI.
+- **Sandbox / auto-review**: `python_exec` / non-Python skills currently share
+  the host process/env. Auto-review (`websearch/auto_review.py`) blocks
+  host-damaging commands while allowing target-directed work. Optional
+  `SLEUTH_SKILL_SANDBOX=bwrap|docker` can isolate further later; until then,
+  keep the kill-switches obvious in the UI.
 
 ---
 

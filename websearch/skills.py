@@ -41,7 +41,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, skill_lang
+from . import config, skill_lang, auto_review
 
 log = logging.getLogger(__name__)
 
@@ -235,6 +235,15 @@ class Registry:
             skill.schema = schema
 
     def _load_python(self, skill: Skill, name: str, path: Path, meta: dict) -> Skill:
+        try:
+            code = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            skill.error = f"could not read {path}: {exc}"
+            return skill
+        blocked = auto_review.classify_text(code)
+        if not blocked.allowed:
+            skill.error = blocked.message()
+            return skill
         modname = f"websearch._skills.{name}"
         try:
             spec = importlib.util.spec_from_file_location(modname, path)
@@ -274,6 +283,10 @@ class Registry:
             skill.error = f"could not read {path}: {exc}"
             return skill
         comment_desc, comment_schema = skill_lang.schema_from_comments(code)
+        blocked = auto_review.classify_text(code)
+        if not blocked.allowed:
+            skill.error = blocked.message()
+            return skill
         skill.schema = comment_schema
         skill.description = comment_desc or f"Skill '{name}' ({lang.name})."
         self._apply_meta(skill, meta, skill.description)
@@ -311,6 +324,13 @@ def _to_text(value) -> str:
 
 async def _invoke_skill(skill: Skill, kwargs: dict) -> str:
     try:
+        source = skill.path.read_text(encoding="utf-8") if skill.path.is_file() else ""
+    except OSError:
+        source = ""
+    blocked = auto_review.guard(skill.name, kwargs, source=source)
+    if blocked:
+        return blocked
+    try:
         if skill.is_async:
             value = await asyncio.wait_for(skill.fn(**kwargs), timeout=config.SKILL_TIMEOUT)
         else:
@@ -329,6 +349,13 @@ async def _invoke_skill(skill: Skill, kwargs: dict) -> str:
 def _skill_wrapper(skill: Skill):
     async def wrapper(**kwargs):
         return await _invoke_skill(skill, kwargs)
+    wrapper.__name__ = skill.name
+    wrapper.__doc__ = skill.description
+    if skill.fn is not None:
+        try:
+            wrapper.__signature__ = inspect.signature(skill.fn)
+        except (TypeError, ValueError):
+            pass
     return wrapper
 
 
@@ -373,6 +400,9 @@ def skill_write(
     bad = _bad_name(name)
     if bad:
         return bad
+    blocked = auto_review.guard("skill_write", {"name": name, "code": code})
+    if blocked:
+        return blocked
     try:
         lang_name = skill_lang.detect_language(code, hint=language)
         schema_override = skill_lang.schema_from_parameters(parameters)
@@ -599,6 +629,9 @@ def code_write(path: str, content: str) -> str:
     ``.py`` file that stops parsing)."""
     if not config.CODE_EDIT_ENABLED:
         return "Self-editing is disabled (SLEUTH_ALLOW_SELF_EDIT=false)."
+    blocked = auto_review.guard("code_write", {"path": path, "content": content})
+    if blocked:
+        return blocked
     target = _resolve_in_root(path)
     if target is None:
         return f"Refused: '{path}' is outside CODE_ROOT ({config.CODE_ROOT})."
@@ -640,6 +673,9 @@ def code_revert(path: str) -> str:
     """Restore a source file from its most recent snapshot in BACKUP_DIR."""
     if not config.CODE_EDIT_ENABLED:
         return "Self-editing is disabled (SLEUTH_ALLOW_SELF_EDIT=false)."
+    blocked = auto_review.guard("code_revert", {"path": path})
+    if blocked:
+        return blocked
     target = _resolve_in_root(path)
     if target is None:
         return f"Refused: '{path}' is outside CODE_ROOT ({config.CODE_ROOT})."
@@ -696,6 +732,9 @@ async def python_exec(code: str) -> str:
     """
     if not config.EXEC_ENABLED:
         return "Execution is disabled (SLEUTH_ALLOW_EXEC=false)."
+    blocked = auto_review.guard("python_exec", {"code": code})
+    if blocked:
+        return blocked
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(_run_python_sync, code), timeout=config.EXEC_TIMEOUT
@@ -711,6 +750,9 @@ async def shell_exec(command: str, timeout: float = 0) -> str:
     """Run a shell command from CODE_ROOT and return its stdout, stderr and code."""
     if not config.EXEC_ENABLED:
         return "Execution is disabled (SLEUTH_ALLOW_EXEC=false)."
+    blocked = auto_review.guard("shell_exec", {"command": command})
+    if blocked:
+        return blocked
     limit = timeout or config.EXEC_TIMEOUT
 
     def _run() -> str:
@@ -842,7 +884,8 @@ _META_SCHEMAS: list[dict] = [
             "Run Python in-process against the live package and get its output. "
             "Good for trying a skill you just wrote, or one-off computation. The "
             "package is available as `ws`. print() is captured; a `result` "
-            "variable is reported."
+            "variable is reported. Auto-review blocks host-damaging code; "
+            "target-directed work is allowed."
         ),
         "parameters": {
             "type": "object",
@@ -852,7 +895,11 @@ _META_SCHEMAS: list[dict] = [
     },
     {
         "name": "shell_exec", "group": "exec",
-        "description": "Run a shell command from the project root and return its output.",
+        "description": (
+            "Run a shell command from the project root and return its output. "
+            "Auto-review blocks host-damaging commands; work aimed at a remote "
+            "target (curl to a URL, ssh/adb to a remote host) is allowed."
+        ),
         "parameters": {
             "type": "object",
             "properties": {

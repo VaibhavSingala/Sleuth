@@ -359,12 +359,31 @@ Each capability has an independent kill-switch (all default **on**; flip any to
 | `SLEUTH_SKILLS=false` | The whole subsystem — no skills, no code tools, no exec |
 | `SLEUTH_ALLOW_SELF_EDIT=false` | `code_write` / `code_revert` (reads still allowed) |
 | `SLEUTH_ALLOW_EXEC=false` | `python_exec` / `shell_exec` |
+| `SLEUTH_AUTO_REVIEW=false` | Turns off the host-vs-target classifier (not recommended) |
 | `SLEUTH_CODE_ROOT=<path>` | Confines the `code_*` tools to a subtree (traversal outside is refused) |
 
 Also: `SLEUTH_SKILLS_DIR`, `SLEUTH_EXEC_TIMEOUT`, `SLEUTH_SKILL_TIMEOUT`,
-`SLEUTH_BACKUP_DIR`, `SLEUTH_BACKUP_KEEP`. If you're pointing this agent at the
+`SLEUTH_BACKUP_DIR`, `SLEUTH_BACKUP_KEEP`, `SLEUTH_AUTO_REVIEW_LOCAL_HOSTS`. If you're pointing this agent at the
 open web on an untrusted network, running with `SLEUTH_ALLOW_EXEC=false` (or the
 whole subsystem off) is the conservative default.
+
+### Auto-review — host vs target
+
+Like Cursor Auto-review, Sleuth does not ask a human to click Approve on every
+tool call. Built-in recon and scanner tools run immediately. `python_exec`,
+`shell_exec`, `skill_write`, authored skills, and `code_write` go through a
+classifier:
+
+- **Allowed:** work aimed at an engagement target — HTTP to a URL, payloads in
+  a skill that takes `url`, `ssh`/`adb`/`kubectl exec` to a **remote** host,
+  ZAP/Burp/Wapiti (still gated by their own `.env` flags).
+- **Blocked:** damage to the **Sleuth host** — wiping `/` or `$HOME`,
+  `dd`/`mkfs` to a local disk, `curl | sh`, killing PID 1, writing `/etc`,
+  disabling the classifier, editing `websearch/auto_review.py`.
+
+This is static review, not a sandbox. It will not catch every obfuscated
+payload; it exists so a prompt-injected model cannot casually `rm -rf /` on
+the box Sleuth is running on.
 
 ---
 
@@ -570,6 +589,7 @@ call.
 | `SLEUTH_SKILLS` | `true` | Master switch for [self-extension](#self-extension--the-model-writes-its-own-tools) (authored skills, code tools, exec) |
 | `SLEUTH_ALLOW_SELF_EDIT` | `true` | Allow `code_write` / `code_revert` on the project's own source |
 | `SLEUTH_ALLOW_EXEC` | `true` | Allow `python_exec` / `shell_exec` |
+| `SLEUTH_AUTO_REVIEW` | `true` | Block host-damaging exec; allow target-directed work ([auto-review](#auto-review--host-vs-target)) |
 | `SLEUTH_CODE_ROOT` | project root | Confine the `code_*` tools to this subtree |
 
 **Context budget:** `research` with 3 pages at 4000 chars each is roughly

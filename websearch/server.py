@@ -61,7 +61,8 @@ mcp = FastMCP(
         "Go, Lua, R) as a new tool (call it via `skill_call` this "
         "session, or reconnect to get it as its own tool), and you can read and "
         "edit this server's own source (`code_read`/`code_write`) and run code "
-        "(`python_exec`/`shell_exec`) when those are enabled. "
+        "(`python_exec`/`shell_exec`) when those are enabled. Auto-review "
+        "allows target-directed work and blocks host-damaging local commands. "
         "Always prefer these tools over recalling facts for anything current, "
         "version-specific, or that you are unsure about."
     ),
@@ -366,7 +367,11 @@ def _register_self_extension() -> None:
     skills.refresh()
     for skill in skills.REGISTRY.valid():
         try:  # a skill with an exotic signature shouldn't stop the server
-            mcp.add_tool(skill.fn, name=skill.name, description=skill.description)
+            mcp.add_tool(
+                skills._skill_wrapper(skill),
+                name=skill.name,
+                description=skill.description,
+            )
         except Exception as exc:  # noqa: BLE001
             logging.getLogger(__name__).warning(
                 "could not register skill '%s' as an MCP tool: %s", skill.name, exc

@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from . import config, llm, skills
+from . import config, llm, skills, auto_review
 from .analyze import analyze_site, compare_sites
 from .burp.reports import parse_report as burp_parse_report
 from .burp.scan import scan_status as burp_scan_status
@@ -455,7 +455,8 @@ SKILLS_PROMPT = (
     "can also read and edit this project's own source "
     "(`code_read`/`code_search`/`code_write`) and run code "
     "(`python_exec`/`shell_exec`). Prefer a small, well-named skill over "
-    "repeating ad-hoc `python_exec`."
+    "repeating ad-hoc `python_exec`. Auto-review allows code aimed at the "
+    "engagement target and blocks commands that would damage the Sleuth host."
 )
 
 SYSTEM_PROMPT = (
@@ -558,6 +559,9 @@ async def _call_tool(name: str, arguments: dict) -> str:
     handler = resolve_handler(name)
     if handler is None:
         return f"Error: unknown tool '{name}'."
+    blocked = auto_review.guard(name, arguments)
+    if blocked:
+        return blocked
     try:
         result = handler(**arguments)
         if inspect.isawaitable(result):  # handlers may be sync or async
@@ -814,6 +818,8 @@ async def run_stream(
                     "name": name,
                     "preview": _preview(result),
                 }
+                if isinstance(result, str) and result.startswith(auto_review.BLOCK_PREFIX):
+                    event["blocked"] = True
                 report = _extract_report(result)
                 if report:
                     event["report"] = report

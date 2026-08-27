@@ -109,6 +109,8 @@
   .ops-block{margin-bottom:8px;border:1px solid var(--border);background:rgba(0,0,0,.3)}
   .ops-block.running{border-color:var(--amber);box-shadow:0 0 12px rgba(255,176,32,.1)}
   .ops-block.done{border-color:var(--border)}
+  .ops-block.blocked{border-color:var(--red)}
+  .ops-block.blocked .state{color:var(--red)}
   .ops-line{display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:11px;
     border-bottom:1px solid rgba(26,61,40,.5)}
   .ops-line .pid{color:var(--muted);min-width:42px}
@@ -378,13 +380,15 @@ function addChip(steps,name,args,done,preview,report){
   if(report)addReport(anchor,report,'DUMP :: '+name);
   blk._pid=pid;blk._name=name;return blk;
 }
-function finishChip(blk,preview,report){
+function finishChip(blk,preview,report,blocked){
   if(!blk)return;
   blk.classList.remove('running');blk.classList.add('done');
-  const st=blk.querySelector('.state');if(st){st.className='state ok';st.textContent='[OK]';}
+  if(blocked)blk.classList.add('blocked');
+  const st=blk.querySelector('.state');
+  if(st){st.className='state '+(blocked?'halt':'ok');st.textContent=blocked?'[BLOCK]':'[OK]';}
   runningMap.delete(blk._pid);updateRunning();
   toolCount++;if(isSkill(blk._name))skillCount++;
-  updateMetrics();feed('DONE '+blk._name,'ok');
+  updateMetrics();feed((blocked?'BLOCK ':'DONE ')+blk._name,blocked?'err':'ok');
   let anchor=blk.querySelector('.ops-line');
   if(preview){let p=blk.querySelector('.term-out');if(!p){p=document.createElement('div');p.className='term-out';blk.appendChild(p);}p.textContent=preview;anchor=p;}
   if(report)addReport(anchor,report,'DUMP :: '+blk._name);
@@ -442,7 +446,7 @@ async function sendMessage(){
         if(ev.type==='conversation'){currentConv=ev.id;if(scopeInput.value.trim())saveScope();
           if(ev.scope?.target_url){scopeTarget=ev.scope.target_url;scopeInput.value=scopeTarget;}}
         else if(ev.type==='tool_call'){chip=addChip(steps,ev.name,ev.args||{},false,'');scrollDown();}
-        else if(ev.type==='tool_result'){finishChip(chip,ev.preview||'',ev.report||'');chip=null;scrollDown();}
+        else if(ev.type==='tool_result'){finishChip(chip,ev.preview||'',ev.report||'',ev.blocked);chip=null;scrollDown();}
         else if(ev.type==='reasoning_delta'){
           if(!reasonEl){reasonEl=document.createElement('div');reasonEl.className='reason';
             body.querySelector('.thinking')?.remove();body.parentNode.insertBefore(reasonEl,body);}
