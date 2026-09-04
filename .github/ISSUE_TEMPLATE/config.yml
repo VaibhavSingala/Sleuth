@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (private)
+    url: https://github.com/VaibhavSingala/Sleuth/security/advisories/new
+    about: Report anything that bypasses a safety gate privately. Do not open a public issue.
+  - name: Question / usage help
+    url: https://github.com/VaibhavSingala/Sleuth/discussions
+    about: Ask setup and usage questions here.

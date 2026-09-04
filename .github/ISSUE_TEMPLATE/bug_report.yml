@@ -1,0 +1,61 @@
+name: Bug report
+description: Something isn't working as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Do not** paste real API keys, target hostnames you
+        don't own, or full exploit chains. For security-sensitive reports, use the
+        private advisory flow in SECURITY.md instead of this form.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran and what went wrong.
+      placeholder: "Called the `research` tool and got ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact tool/skill name and arguments, or CLI command.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python version, install method, Sleuth version/commit, LLM provider.
+      value: |
+        - OS:
+        - Python:
+        - Sleuth version/commit:
+        - LLM provider (LM Studio / Ollama / OmniRoute / custom):
+    validations:
+      required: true
+  - type: dropdown
+    id: gates
+    attributes:
+      label: Which safety gates were enabled?
+      multiple: true
+      options:
+        - SLEUTH_ALLOW_EXEC
+        - SLEUTH_ALLOW_SELF_EDIT
+        - SLEUTH_ALLOW_ACTIVE_SKILLS
+        - BURP/ZAP/WAPITI active scan
+        - None (defaults)
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact secrets. Set WEBSEARCH_LOG_LEVEL=DEBUG for more detail.
+      render: shell
