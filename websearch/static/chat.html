@@ -574,7 +574,15 @@ input.addEventListener('keydown',e=>{
 input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,120)+'px';
   if(input.value.startsWith('/'))showSlashMenu(input.value.slice(1));else hideSlashMenu();});
 
-bootSequence();loadModels();loadConvs();loadSkills();setInterval(loadModels,20000);input.focus();
+bootSequence();loadConvs();loadSkills();input.focus();
+// Poll the model list to keep the status dot honest, but only while the tab
+// is actually visible -- an idle background tab shouldn't keep hammering
+// the LLM provider's /models endpoint (some gateways log every such call).
+let modelsPoll=null;
+function startModelsPoll(){if(!modelsPoll){loadModels();modelsPoll=setInterval(loadModels,60000);}}
+function stopModelsPoll(){if(modelsPoll){clearInterval(modelsPoll);modelsPoll=null;}}
+document.addEventListener('visibilitychange',()=>{document.hidden?stopModelsPoll():startModelsPoll();});
+if(!document.hidden)startModelsPoll();
 </script>
 </body>
 </html>

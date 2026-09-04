@@ -217,13 +217,22 @@ CACHE_DIR = Path(_env("WEBSEARCH_CACHE_DIR", str(PROJECT_ROOT / ".cache")))
 CACHE_TTL_SECONDS = _env_int("WEBSEARCH_CACHE_TTL", 900)  # 15 minutes
 
 # --- Local LLM server (used by agent.py only) -----------------------------
-# "auto" probes LM Studio (:1234) then Ollama (:11434). Set a provider name
-# or an explicit LLM_BASE_URL to skip detection.
+# "auto" probes LM Studio (:1234), then Ollama (:11434), then OmniRoute
+# (:20128). Set a provider name or an explicit LLM_BASE_URL to skip detection.
 # The older LMSTUDIO_* names still work so existing setups keep running.
 LLM_PROVIDER = _env("LLM_PROVIDER", "auto").lower()
-LLM_BASE_URL = (_env("LLM_BASE_URL") or _env("LMSTUDIO_BASE_URL")).rstrip("/")
-LLM_API_KEY = _env("LLM_API_KEY") or _env("LMSTUDIO_API_KEY")
+LLM_BASE_URL = (
+    _env("LLM_BASE_URL") or _env("LMSTUDIO_BASE_URL") or _env("OMNIROUTE_API_URL")
+).rstrip("/")
+LLM_API_KEY = _env("LLM_API_KEY") or _env("LMSTUDIO_API_KEY") or _env("OMNIROUTE_API_KEY")
 LLM_MODEL = _env("LLM_MODEL") or _env("LMSTUDIO_MODEL")  # empty -> auto-pick
+
+# OmniRoute (https://github.com/diegosouzapw/OmniRoute) is a self-hosted,
+# OpenAI-compatible AI gateway -- multi-provider routing, fallback, caching.
+# Kept separate from LLM_API_KEY/LLM_BASE_URL above (which still win if set)
+# so `LLM_PROVIDER=omniroute` can pick these up explicitly.
+OMNIROUTE_API_URL = _env("OMNIROUTE_API_URL").rstrip("/")
+OMNIROUTE_API_KEY = _env("OMNIROUTE_API_KEY")
 
 
 def active_backend() -> str:

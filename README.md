@@ -505,6 +505,26 @@ in front of it — [`ollmcp`](https://github.com/jonigl/mcp-client-for-ollama),
 Open WebUI, Cline or Continue.dev — and you'd point that client at
 `run_server.py` the same way `install.py` points LM Studio at it.
 
+### Using it with OmniRoute
+
+[OmniRoute](https://github.com/diegosouzapw/OmniRoute) is a self-hosted,
+OpenAI-compatible AI gateway that routes across multiple LLM providers with
+fallback and caching — handy if you want the agent talking to a hosted model
+(OpenAI, Anthropic, etc.) through one gateway instead of a local server.
+Set its URL and key in `.env`:
+
+```bash
+OMNIROUTE_API_URL=http://localhost:20128/v1
+OMNIROUTE_API_KEY=your-omniroute-key
+```
+
+That's enough on its own — `LLM_PROVIDER=auto` picks it up. To skip
+auto-detection, set `LLM_PROVIDER=omniroute` explicitly:
+
+```bash
+LLM_PROVIDER=omniroute python -m websearch.agent "/analyze vercel.com"
+```
+
 ### Any other OpenAI-compatible server
 
 vLLM, llama.cpp's server, LocalAI, a remote box — set the base URL:
@@ -585,9 +605,11 @@ call.
 | `WEBSEARCH_CACHE_TTL` | `900` | Cache lifetime in seconds |
 | `WEBSEARCH_BLOCK_PRIVATE` | `true` | Refuse to fetch private/loopback addresses |
 | `WEBSEARCH_LOG_LEVEL` | `INFO` | This package's log level; dependencies are capped at `WARNING` |
-| `LLM_PROVIDER` | `auto` | `auto` \| `lmstudio` \| `ollama` \| `custom` |
+| `LLM_PROVIDER` | `auto` | `auto` \| `lmstudio` \| `ollama` \| `omniroute` \| `custom` |
 | `LLM_BASE_URL` | — | Override the provider default, or point at any OpenAI-compatible server |
 | `LLM_MODEL` | — | Pin a model; blank auto-picks a tool-capable one |
+| `OMNIROUTE_API_URL` | `http://localhost:20128/v1` | Base URL of a self-hosted [OmniRoute](https://github.com/diegosouzapw/OmniRoute) gateway |
+| `OMNIROUTE_API_KEY` | — | OmniRoute's API key |
 | `BURP_PROXY` | — | Route target traffic through Burp, e.g. `http://127.0.0.1:8080` |
 | `BURP_API_URL` | `http://127.0.0.1:1337` | Burp Pro REST API base |
 | `BURP_ALLOW_ACTIVE_SCAN` | `false` | Must be `true` to start active scans |

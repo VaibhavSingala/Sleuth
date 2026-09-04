@@ -24,6 +24,13 @@ _LLM_HOST = "host.docker.internal" if os.environ.get("SLEUTH_IN_DOCKER") else "l
 PROVIDERS = {
     "lmstudio": {"base_url": f"http://{_LLM_HOST}:1234/v1", "api_key": "lm-studio"},
     "ollama": {"base_url": f"http://{_LLM_HOST}:11434/v1", "api_key": "ollama"},
+    # OmniRoute: self-hosted OpenAI-compatible AI gateway, dashboard + API on
+    # one port. Unlike LM Studio/Ollama it actually enforces its API key, so
+    # fall back to config.OMNIROUTE_API_KEY (there is no safe placeholder).
+    "omniroute": {
+        "base_url": config.OMNIROUTE_API_URL or f"http://{_LLM_HOST}:20128/v1",
+        "api_key": config.OMNIROUTE_API_KEY,
+    },
 }
 
 # LM Studio reports these in /api/v0/models; Ollama reports capabilities.
@@ -50,23 +57,32 @@ async def detect(client: httpx.AsyncClient) -> tuple:
     """Return (provider_name, base_url, api_key) for whatever is running.
 
     An explicit base URL always wins. Otherwise LM Studio is probed first,
-    then Ollama, so an existing setup keeps working unchanged.
+    then Ollama, then OmniRoute, so an existing setup keeps working unchanged.
     """
     if config.LLM_BASE_URL:
-        name = config.LLM_PROVIDER if config.LLM_PROVIDER != "auto" else "custom"
+        name = config.LLM_PROVIDER
+        if name == "auto":
+            # A base URL that happens to match a known provider's default
+            # (e.g. OMNIROUTE_API_URL feeding LLM_BASE_URL) still gets that
+            # provider's label instead of the generic "custom".
+            name = next(
+                (n for n, spec in PROVIDERS.items()
+                 if spec["base_url"].rstrip("/") == config.LLM_BASE_URL.rstrip("/")),
+                "custom",
+            )
         # Never return an empty key: "Authorization: Bearer " is an illegal
         # header and httpx rejects it before the request leaves.
-        default_key = PROVIDERS.get(name, {}).get("api_key", "local")
+        default_key = PROVIDERS.get(name, {}).get("api_key") or "local"
         return name, config.LLM_BASE_URL, config.LLM_API_KEY or default_key
 
     if config.LLM_PROVIDER in PROVIDERS:
         spec = PROVIDERS[config.LLM_PROVIDER]
-        return config.LLM_PROVIDER, spec["base_url"], config.LLM_API_KEY or spec["api_key"]
+        return config.LLM_PROVIDER, spec["base_url"], config.LLM_API_KEY or spec["api_key"] or "local"
 
     for name, spec in PROVIDERS.items():
         if await _alive(client, spec["base_url"]):
             log.info("detected %s at %s", name, spec["base_url"])
-            return name, spec["base_url"], config.LLM_API_KEY or spec["api_key"]
+            return name, spec["base_url"], config.LLM_API_KEY or spec["api_key"] or "local"
 
     raise ProviderError(
         "No local LLM server found. Start LM Studio's server (Developer tab) "
