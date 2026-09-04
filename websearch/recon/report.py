@@ -181,11 +181,11 @@ def build(
     if content.meta_keywords:
         out.append(f"- Declared meta keywords: {content.meta_keywords[:300]}")
     if content.keywords:
-        out.append(f"\n**Top terms** (count, share of all words)\n")
+        out.append("\n**Top terms** (count, share of all words)\n")
         for term, count, density in content.keywords[:kw_limit]:
             out.append(f"- {term} — {count}× ({density}%)")
     if content.phrases and not brief:
-        out.append(f"\n**Recurring phrases**\n")
+        out.append("\n**Recurring phrases**\n")
         for phrase, count in content.phrases[: kw_limit - 2]:
             out.append(f"- \"{phrase}\" — {count}×")
 

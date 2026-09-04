@@ -31,14 +31,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Ruff (lint)
-        run: ruff check .
+      # ── Blocking gates ──────────────────────────────────────────────────
+      # Real-bug rules (pyflakes) on the core package: undefined names, unused
+      # imports, broken f-strings. Style/format is NOT enforced repo-wide yet —
+      # the legacy codebase predates ruff; Phase 2 formats it and flips the
+      # advisory steps below to blocking.
+      - name: Ruff — real-bug check (core package)
+        run: ruff check --select F websearch
 
-      - name: Ruff (format check)
-        run: ruff format --check .
-
-      - name: mypy (type check, non-blocking during migration)
-        run: mypy websearch || true
+      # New code (tests/) is held to the full standard from day one.
+      - name: Ruff — lint + format (tests)
+        run: |
+          ruff check tests
+          ruff format --check tests
 
       - name: pytest
         run: pytest --cov --cov-report=term-missing
+
+      # ── Advisory (non-blocking during the migration) ────────────────────
+      - name: Ruff — full lint (advisory)
+        continue-on-error: true
+        run: ruff check .
+
+      - name: Ruff — full format check (advisory)
+        continue-on-error: true
+        run: ruff format --check .
+
+      - name: mypy (advisory)
+        continue-on-error: true
+        run: mypy websearch

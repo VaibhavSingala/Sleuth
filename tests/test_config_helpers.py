@@ -15,8 +15,16 @@ config = importlib.import_module("websearch.config")
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [("1", True), ("true", True), ("YES", True), ("on", True),
-     ("0", False), ("false", False), ("no", False), ("", None)],
+    [
+        ("1", True),
+        ("true", True),
+        ("YES", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("no", False),
+        ("", None),
+    ],
 )
 def test_env_bool(monkeypatch: pytest.MonkeyPatch, value: str, expected: bool | None) -> None:
     monkeypatch.setenv("SLEUTH_TEST_FLAG", value)
