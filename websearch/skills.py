@@ -37,6 +37,8 @@ import subprocess
 import sys
 import traceback
 import typing
+
+import httpx
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
@@ -361,6 +363,78 @@ def _skill_wrapper(skill: Skill):
     return wrapper
 
 
+# --- smoke test: does a freshly-authored skill actually run? --------------
+
+# Exceptions that mean the code is broken regardless of input: it references a
+# name/module/attribute that does not exist, or is malformed. These are the
+# signature of a skill that loads but crashes on the first call (e.g. calling a
+# tool that is not in scope). Runtime errors from the placeholder args (bad
+# URL, missing API key, ...) are NOT here — they must not fail a good skill.
+_STRUCTURAL_EXC = (
+    NameError, UnboundLocalError, ImportError, IndentationError, RecursionError,
+)
+
+_DUMMY_BY_TYPE = {
+    "string": "test", "integer": 1, "number": 1.0,
+    "boolean": True, "array": [], "object": {},
+}
+
+
+def _dummy_args(schema: dict) -> dict:
+    """Synthesise placeholder kwargs for the skill's required parameters."""
+    props = (schema or {}).get("properties", {}) or {}
+    required = set((schema or {}).get("required", []) or [])
+    args: dict = {}
+    for pname, spec in props.items():
+        if required and pname not in required:
+            continue  # only fill required args; optionals keep their defaults
+        args[pname] = _DUMMY_BY_TYPE.get((spec or {}).get("type"), "test")
+    return args
+
+
+def _smoke_test(skill: Skill) -> tuple[str, str]:
+    """Call the skill once with placeholder args. Returns (verdict, detail).
+
+    verdict: 'pass' (ran clean), 'fail' (structural crash or hang — the code is
+    broken), 'inconclusive' (a runtime error the placeholder args could explain),
+    or 'skip' (not smoke-tested).
+    """
+    if skill.fn is None:
+        return ("skip", "no callable entry point")
+    if skill.name in config.ACTIVE_SKILL_NAMES:
+        return ("skip", "active/intrusive skill — not auto-invoked")
+
+    args = _dummy_args(skill.schema)
+    box: dict = {}
+
+    def _run() -> None:
+        try:
+            box["value"] = (
+                asyncio.run(skill.fn(**args)) if skill.is_async else skill.fn(**args)
+            )
+        except Exception as exc:  # classified below into pass/fail/inconclusive
+            box["exc"] = exc
+
+    import threading
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(config.SKILL_SMOKE_TIMEOUT)
+    if thread.is_alive():
+        return ("fail", f"no return within {config.SKILL_SMOKE_TIMEOUT:.0f}s "
+                        "(possible hang or blocking loop)")
+
+    exc = box.get("exc")
+    if exc is None:
+        return ("pass", "ran without error on placeholder args")
+    if isinstance(exc, TypeError) and "argument" in str(exc).lower():
+        return ("inconclusive", f"placeholder args did not fit the signature: {exc}")
+    if isinstance(exc, _STRUCTURAL_EXC):
+        return ("fail", f"{type(exc).__name__}: {exc}")
+    return ("inconclusive",
+            f"{type(exc).__name__} (likely from placeholder args): {str(exc)[:160]}")
+
+
 # --- meta-tools: skill management ----------------------------------------
 
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,48}$")
@@ -377,9 +451,78 @@ def _bad_name(name: str) -> str | None:
     return None
 
 
+# --- skill authoring handoff (Needle escalates -> code model writes code) ---
+
+# Mirrors the training contract in skill_train/build_dataset.py so the authored
+# code matches what the skill-author model was fine-tuned to produce.
+_SKILL_AUTHOR_CONTRACT = (
+    "You are Sleuth's skill author. Write a new Sleuth skill as a single, "
+    "SELF-CONTAINED Python file. Define ONE top-level function named exactly "
+    "like the skill; type-hint every argument (they become the tool's "
+    "arguments); write a Google-style docstring with Args and Returns (it "
+    "becomes the tool description); return a dict or str. Import everything you "
+    "use at the top of the file -- nothing is injected into scope. For "
+    "deterministic work use the Python standard library; NEVER pull in an LLM or "
+    "agent framework (langchain, openai, ...) to do plain computation. Handle "
+    "bad input by returning an {'error': ...} dict rather than raising. Output "
+    "only the code file: no prose, no markdown fences."
+)
+
+
+def _strip_code_fences(text: str) -> str:
+    """Drop a leading ```lang / trailing ``` wrapper if the model added one."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:]  # drop the opening fence line
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines)
+    return text.strip()
+
+
+def _author_skill_code(name: str, description: str) -> str:
+    """Ask the skill-author model to write a skill's code from its spec.
+
+    Returns the generated source, or raises RuntimeError on any transport or
+    parse failure so the caller can report it to the model.
+    """
+    instruction = (
+        f"Write a Sleuth skill named `{name}` that {description.strip().rstrip('.')}."
+    )
+    payload = {
+        "model": config.SKILL_AUTHOR_MODEL,
+        "messages": [
+            {"role": "system", "content": _SKILL_AUTHOR_CONTRACT},
+            {"role": "user", "content": instruction},
+        ],
+        "temperature": 0,
+        "max_tokens": 1024,
+        "stream": False,
+    }
+    url = f"{config.SKILL_AUTHOR_BASE_URL}/chat/completions"
+    headers = {"Authorization": f"Bearer {config.SKILL_AUTHOR_API_KEY}"}
+    try:
+        resp = httpx.post(url, json=payload, headers=headers,
+                          timeout=config.SKILL_AUTHOR_TIMEOUT)
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
+    except httpx.HTTPError as exc:
+        raise RuntimeError(
+            f"could not reach the skill-author model at "
+            f"{config.SKILL_AUTHOR_BASE_URL} ({exc})"
+        ) from exc
+    except (KeyError, ValueError, TypeError) as exc:
+        raise RuntimeError(f"unexpected skill-author response: {exc}") from exc
+    code = _strip_code_fences(content)
+    if not code:
+        raise RuntimeError("the skill-author model returned empty output")
+    return code
+
+
 def skill_write(
     name: str,
-    code: str,
+    code: str = "",
     description: str = "",
     language: str = "auto",
     parameters: str = "",
@@ -393,6 +536,10 @@ def skill_write(
     JSON on argv[1], stdin, `SLEUTH_ARGS_JSON`, or `SLEUTH_ARG_<NAME>`, and
     print the result to stdout.
 
+    If `code` is omitted but `description` is given, the skill-author model
+    writes the code from the name + description (this is the Needle escalation
+    path). The result is then smoke-tested like any other authored skill.
+
     `language` is `auto` (detect from shebang/source), or an explicit name.
     `parameters` is optional JSON describing the tool args when they cannot be
     inferred (`{"f": "number"}` or a full schema with `properties`).
@@ -402,6 +549,25 @@ def skill_write(
     bad = _bad_name(name)
     if bad:
         return bad
+
+    authored = False
+    if not code.strip():
+        if not description.strip():
+            return (
+                "Provide either `code`, or a `description` of what the skill "
+                "should do so the skill-author model can write it."
+            )
+        if not config.SKILL_AUTHOR_ENABLED:
+            return (
+                "No `code` was given and the skill-author model is disabled "
+                "(SLEUTH_SKILL_AUTHOR=false). Provide the `code` argument."
+            )
+        try:
+            code = _author_skill_code(name, description)
+            authored = True
+        except RuntimeError as exc:
+            return f"Could not auto-author skill '{name}': {exc}"
+
     blocked = auto_review.guard("skill_write", {"name": name, "code": code})
     if blocked:
         return blocked
@@ -464,13 +630,34 @@ def skill_write(
             f"Saved {path}, but it does not work yet -- fix and call skill_write "
             f"again:\n{skill.error}"
         )
+
+    # When we auto-authored the code, show it so the caller can inspect (or fix)
+    # what the skill-author model produced.
+    authored_note = f"\n(auto-authored by {config.SKILL_AUTHOR_MODEL})" if authored else ""
+    authored_code = f"\n\nGenerated code:\n{code.rstrip()}" if authored else ""
+
+    smoke_line = ""
+    if config.SKILL_SMOKE_TEST and skill.language == "python":
+        verdict, detail = _smoke_test(skill)
+        if verdict == "fail":
+            return (
+                f"Saved {path}, but it FAILED the smoke test -- the code loads "
+                f"but crashes when called. Fix and call skill_write again:"
+                f"\n{detail}{authored_code}"
+            )
+        if verdict == "pass":
+            smoke_line = "\nSmoke test: passed."
+        elif verdict == "inconclusive":
+            smoke_line = f"\nSmoke test: inconclusive ({detail})."
+
     return (
-        f"Skill '{name}' is live and callable now.\n"
+        f"Skill '{name}' is live and callable now.{authored_note}\n"
         f"Language: {skill.language}\n"
         f"File: {path.name}\n"
         f"Signature: {name}{_signature_str(skill.fn)}\n"
         f"Description: {skill.description}\n"
         f"Parameters: {json.dumps(skill.schema.get('properties', {}))}"
+        f"{smoke_line}{authored_code}"
     )
 
 
@@ -781,13 +968,14 @@ _META_SCHEMAS: list[dict] = [
     {
         "name": "skill_write", "group": "skills",
         "description": (
-            "Author a new tool for yourself in Python, JavaScript, Bash, Ruby, "
-            "Perl, PHP, Go, Lua or R. Python: define a function named the same "
-            "as the skill (or `run`); its parameters become the tool arguments "
-            "and its docstring the description. Other languages run as a "
-            "subprocess — read JSON args from argv[1] / stdin / SLEUTH_ARGS_JSON "
-            "/ SLEUTH_ARG_<NAME> and print the result to stdout. Use this when a "
-            "capability you need doesn't exist yet."
+            "Author a new tool for yourself when a capability you need doesn't "
+            "exist yet. Provide `code` (full source), OR provide just `name` + "
+            "`description` and a code model will write the code for you. Python: "
+            "define a function named the same as the skill (or `run`); its "
+            "parameters become the tool arguments and its docstring the "
+            "description. Other languages run as a subprocess — read JSON args "
+            "from argv[1] / stdin / SLEUTH_ARGS_JSON / SLEUTH_ARG_<NAME> and "
+            "print the result to stdout."
         ),
         "parameters": {
             "type": "object",
@@ -795,16 +983,19 @@ _META_SCHEMAS: list[dict] = [
                 "name": {"type": "string",
                          "description": "lower_snake_case tool name (also the file stem)."},
                 "code": {"type": "string",
-                         "description": "Full source of the skill."},
+                         "description": "Full source of the skill. Omit to have it "
+                                        "written from `description`."},
                 "description": {"type": "string",
-                                "description": "Optional human summary (docstring / @param comments used if omitted)."},
+                                "description": "What the skill should do. Required if "
+                                               "`code` is omitted (used to author it); "
+                                               "otherwise an optional human summary."},
                 "language": {"type": "string",
                              "description": "python, javascript, bash, ruby, perl, php, go, lua, r, or auto to detect.",
                              "default": "auto"},
                 "parameters": {"type": "string",
                                "description": "Optional JSON object of tool args, e.g. {\"f\":\"number\"}, when they cannot be inferred."},
             },
-            "required": ["name", "code"],
+            "required": ["name"],
         },
     },
     {

@@ -191,6 +191,26 @@ EXEC_ENABLED = _env_bool("SLEUTH_ALLOW_EXEC", False)
 EXEC_TIMEOUT = _env_float("SLEUTH_EXEC_TIMEOUT", 30.0)
 SKILL_TIMEOUT = _env_float("SLEUTH_SKILL_TIMEOUT", 60.0)
 
+# Smoke test: after a skill is authored, actually call it once with placeholder
+# args to catch code that loads but crashes on invocation (e.g. references a
+# tool name that is not in scope). Structural crashes/hangs downgrade the
+# skill_write result to a warning; runtime errors from the dummy args do not.
+SKILL_SMOKE_TEST = _env_bool("SLEUTH_SKILL_SMOKE_TEST", True)
+SKILL_SMOKE_TIMEOUT = _env_float("SLEUTH_SKILL_SMOKE_TIMEOUT", 8.0)
+
+# Skill authoring handoff: when skill_write is called with a description but no
+# code (e.g. the Needle router escalated because no existing tool fits), a small
+# code model writes the code from the name + description. Defaults to the
+# Qwen2.5-Coder skill-author served on Ollama (see skill_train/).
+_SKILL_AUTHOR_HOST = "host.docker.internal" if os.environ.get("SLEUTH_IN_DOCKER") else "localhost"
+SKILL_AUTHOR_ENABLED = _env_bool("SLEUTH_SKILL_AUTHOR", True)
+SKILL_AUTHOR_BASE_URL = (
+    _env("SLEUTH_SKILL_AUTHOR_URL") or f"http://{_SKILL_AUTHOR_HOST}:11434/v1"
+).rstrip("/")
+SKILL_AUTHOR_MODEL = _env("SLEUTH_SKILL_AUTHOR_MODEL", "sleuth-skill-coder")
+SKILL_AUTHOR_API_KEY = _env("SLEUTH_SKILL_AUTHOR_KEY", "ollama")
+SKILL_AUTHOR_TIMEOUT = _env_float("SLEUTH_SKILL_AUTHOR_TIMEOUT", 120.0)
+
 # Intrusive skills (brute force, XSS injection, dir busting, composite active
 # checks). Same idea as ZAP_ALLOW_ACTIVE_SCAN: the files stay in the repo for
 # authorised lab use, but they are not registered as tools until this is true.

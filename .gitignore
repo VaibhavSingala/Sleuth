@@ -16,6 +16,12 @@ needle_train/dist/*
 !needle_train/dist/sleuth_needle.cact
 !needle_train/dist/.gitkeep
 
+# skill_train: LoRA output/checkpoints (~600MB) and regenerable data/eval files.
+# The dataset is rebuilt by build_dataset.py; the model is produced by train.sh.
+skill_train/output/
+skill_train/data/
+skill_train/heldout_*.jsonl
+
 
 # --- Python packaging / build ---
 build/
