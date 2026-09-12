@@ -156,6 +156,22 @@ TOOLS: list[dict] = [
             "required": ["expression"],
         },
     },
+    {
+        # Escalation target: NO existing tool covers the request, so a new one
+        # must be authored. Needle only flags the gap and names the needed
+        # capability — it does NOT write `code`; a capable model fills that in
+        # downstream. Hence the router sees name + description + language only.
+        "name": "skill_write",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string"},
+                "language": {"type": "string"},
+            },
+            "required": ["name", "description"],
+        },
+    },
 ]
 
 
@@ -424,6 +440,56 @@ def build() -> list[dict]:
             "install+screenshot → apk_device run_pipeline",
         ))
 
+    # --- escalation: no existing tool fits → author a new one ---
+    # Needle recognises the capability gap and routes to skill_write with a
+    # name + description of what's needed. It does NOT produce `code` — that is
+    # generated downstream by a capable model. These teach "flag the gap"
+    # instead of mis-routing to the closest wrong tool.
+    gaps = [
+        ("exif_gps_to_maplink",
+         "extract EXIF GPS coordinates from an image and return a maps link",
+         ("make a tool that turns EXIF GPS in a photo into a Google Maps link",
+          "I need a skill to pull GPS coords out of image metadata and give me a map URL",
+          "there's no tool for geolocating a photo from its EXIF — add one")),
+        ("pcap_summary",
+         "parse a .pcap capture and summarise hosts, ports and protocols",
+         ("write a skill to summarise a pcap file's talkers and protocols",
+          "no tool reads pcap files — build one that lists top hosts and ports",
+          "add a capability to triage a packet capture")),
+        ("nmap_xml_diff",
+         "diff two nmap XML scans and report newly opened or closed ports",
+         ("make a tool that diffs two nmap XML files and shows port changes",
+          "I need a skill to compare last week's nmap output with today's",
+          "there's no way to diff nmap scans — author one")),
+        ("bulk_file_hash",
+         "compute SHA-256 for every file in a folder and return a manifest",
+         ("write a helper that hashes every file in a directory",
+          "add a skill to produce SHA-256 checksums for a whole folder",
+          "no existing tool bulk-hashes files — create one")),
+        ("jwt_decode",
+         "decode a JWT into header and claims without verifying the signature",
+         ("make a tool that decodes a JWT so I can read its claims",
+          "I need a skill to crack open a JWT and show the payload",
+          "there's no JWT decoder tool — add one")),
+        ("cidr_expand",
+         "expand a CIDR range into the list of host IPs it contains",
+         ("write a skill that expands a CIDR block into individual IPs",
+          "add a tool to list every host address in 10.0.0.0/24",
+          "no tool enumerates a CIDR range — build one")),
+    ]
+    for name, desc, phrasings in gaps:
+        for q in phrasings:
+            rows.append(ex(
+                q,
+                [{"name": "skill_write", "arguments": {
+                    "name": name,
+                    "description": desc,
+                }}],
+                (f"no existing tool covers this → escalate to skill_write; "
+                 f"name the capability ({name}); code is authored downstream, "
+                 f"not by the router"),
+            ))
+
     random.Random(42).shuffle(rows)
     return rows
 
@@ -434,7 +500,7 @@ def main() -> None:
     with OUT.open("w", encoding="utf-8") as fh:
         for row in rows:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-    print(f"wrote {len(rows)} examples → {OUT}")
+    print(f"wrote {len(rows)} examples -> {OUT}")
 
 
 if __name__ == "__main__":

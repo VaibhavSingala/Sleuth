@@ -1,0 +1,29 @@
+# Soup fine-tune config: teach Qwen2.5-Coder-3B to author Sleuth skills.
+# Trainer: https://github.com/MakazhanAlpamys/Soup   (soup train --config soup.yaml)
+
+# Uncensored base: the stock Instruct model reflexively refuses security-flavored
+# asks (recon, brute-force/XSS skills), which breaks authorised pentest use. This
+# community de-aligned build removes that refusal reflex while staying a capable
+# Qwen2.5-Coder. Sleuth's own auto_review guard + active-skill gating still apply.
+base: bappi/Qwen2.5-Coder-3B-Uncensored
+
+task: sft
+
+data:
+  train: ./data/sleuth_skills.jsonl   # built by build_dataset.py (Alpaca format)
+  format: alpaca
+  val_split: 0.1
+  max_length: 1280     # longest example is 1128 tok; caps VRAM without truncating
+
+training:
+  epochs: 8            # small set (~43 rows); LoRA needs more passes to fit
+  lr: 2e-4             # LoRA LR band is 1e-4..3e-4 — 2e-5 was ~10x too low
+  batch_size: auto     # =1 on 6 GB; effective batch = gradient_accumulation_steps (default 4)
+  lora:                # LoRA adapter only; base stays frozen
+    r: 64
+    alpha: 16
+  quantization: 4bit          # QLoRA — ~2-3 GB VRAM for a 3B
+  gradient_checkpointing: full  # trade compute for memory — needed on 6 GB
+  # stream_layers: true  # BETA: last resort if it still OOMs (streams layers from RAM)
+
+output: ./output

@@ -17,6 +17,8 @@ EXPECTED_ACTIVE_SKILLS = {
     "comprehensive_vulnerability_check",
     "check_xss_reflection",
     "check_common_vectors",
+    "stored_xss_comment",
+    "port_scan",
 }
 
 

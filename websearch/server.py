@@ -19,6 +19,9 @@ from .burp.scan import scan_status as _burp_scan_status
 from .burp.scan import scan_url as _burp_scan_url
 from .burp.seed import feed_recon as _burp_feed
 from .core import news_search as _news_search
+from .core import read_url as _read_url
+from .core import research as _research
+from .core import web_search as _web_search
 from .extras import calculate as _calculate
 from .extras import wikipedia_lookup as _wikipedia
 from .wapiti.scan import scan_url as _wapiti_scan_url
@@ -26,9 +29,6 @@ from .zap.scan import alerts as _zap_alerts
 from .zap.scan import scan_status as _zap_scan_status
 from .zap.scan import scan_url as _zap_scan_url
 from .zap.seed import feed_recon as _zap_feed
-from .core import read_url as _read_url
-from .core import research as _research
-from .core import web_search as _web_search
 
 # Root stays at WARNING so no dependency can flood LM Studio's server log --
 # ddgs and its Rust HTTP client (primp) log every upstream engine request at
@@ -69,12 +69,29 @@ mcp = FastMCP(
 )
 
 # Reserve the built-in tool names so an authored skill can't shadow one.
-skills.reserve({
-    "web_search", "news_search", "wikipedia", "calculate", "read_url", "research",
-    "analyze_site", "compare_sites", "burp_parse_report", "burp_feed", "burp_scan",
-    "burp_scan_status", "zap_feed", "zap_alerts", "zap_scan", "zap_scan_status",
-    "wapiti_scan", "clear_web_cache", "skill_call",
-})
+skills.reserve(
+    {
+        "web_search",
+        "news_search",
+        "wikipedia",
+        "calculate",
+        "read_url",
+        "research",
+        "analyze_site",
+        "compare_sites",
+        "burp_parse_report",
+        "burp_feed",
+        "burp_scan",
+        "burp_scan_status",
+        "zap_feed",
+        "zap_alerts",
+        "zap_scan",
+        "zap_scan_status",
+        "wapiti_scan",
+        "clear_web_cache",
+        "skill_call",
+    }
+)
 
 
 @mcp.tool()
@@ -353,8 +370,14 @@ def _register_self_extension() -> None:
     if not config.SKILLS_ENABLED:
         return
 
-    for fn in (skills.skill_write, skills.skill_list, skills.skill_read,
-               skills.skill_delete, skills.code_read, skills.code_search):
+    for fn in (
+        skills.skill_write,
+        skills.skill_list,
+        skills.skill_read,
+        skills.skill_delete,
+        skills.code_read,
+        skills.code_search,
+    ):
         mcp.add_tool(fn)
     if config.CODE_EDIT_ENABLED:
         mcp.add_tool(skills.code_write)
@@ -372,7 +395,7 @@ def _register_self_extension() -> None:
                 name=skill.name,
                 description=skill.description,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logging.getLogger(__name__).warning(
                 "could not register skill '%s' as an MCP tool: %s", skill.name, exc
             )
@@ -382,6 +405,15 @@ _register_self_extension()
 
 
 def main() -> None:
+    # Skills/tools may emit emoji/unicode; force UTF-8 on the process streams so
+    # the default Windows code page (cp1252) can't crash them. MCP frames and
+    # logs are UTF-8, so this is safe for the stdio transport.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
     logging.getLogger(__name__).info(
         "starting websearch MCP server (backend=%s, cache=%s)",
         config.active_backend(),

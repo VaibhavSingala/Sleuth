@@ -191,18 +191,42 @@ EXEC_ENABLED = _env_bool("SLEUTH_ALLOW_EXEC", False)
 EXEC_TIMEOUT = _env_float("SLEUTH_EXEC_TIMEOUT", 30.0)
 SKILL_TIMEOUT = _env_float("SLEUTH_SKILL_TIMEOUT", 60.0)
 
+# Smoke test: after a skill is authored, actually call it once with placeholder
+# args to catch code that loads but crashes on invocation (e.g. references a
+# tool name that is not in scope). Structural crashes/hangs downgrade the
+# skill_write result to a warning; runtime errors from the dummy args do not.
+SKILL_SMOKE_TEST = _env_bool("SLEUTH_SKILL_SMOKE_TEST", True)
+SKILL_SMOKE_TIMEOUT = _env_float("SLEUTH_SKILL_SMOKE_TIMEOUT", 8.0)
+
+# Skill authoring handoff: when skill_write is called with a description but no
+# code (e.g. the Needle router escalated because no existing tool fits), a small
+# code model writes the code from the name + description. Defaults to the
+# Qwen2.5-Coder skill-author served on Ollama (see skill_train/).
+_SKILL_AUTHOR_HOST = "host.docker.internal" if os.environ.get("SLEUTH_IN_DOCKER") else "localhost"
+SKILL_AUTHOR_ENABLED = _env_bool("SLEUTH_SKILL_AUTHOR", True)
+SKILL_AUTHOR_BASE_URL = (
+    _env("SLEUTH_SKILL_AUTHOR_URL") or f"http://{_SKILL_AUTHOR_HOST}:11434/v1"
+).rstrip("/")
+SKILL_AUTHOR_MODEL = _env("SLEUTH_SKILL_AUTHOR_MODEL", "sleuth-skill-coder")
+SKILL_AUTHOR_API_KEY = _env("SLEUTH_SKILL_AUTHOR_KEY", "ollama")
+SKILL_AUTHOR_TIMEOUT = _env_float("SLEUTH_SKILL_AUTHOR_TIMEOUT", 120.0)
+
 # Intrusive skills (brute force, XSS injection, dir busting, composite active
 # checks). Same idea as ZAP_ALLOW_ACTIVE_SCAN: the files stay in the repo for
 # authorised lab use, but they are not registered as tools until this is true.
 ACTIVE_SKILLS_ENABLED = _env_bool("SLEUTH_ALLOW_ACTIVE_SKILLS", False)
-ACTIVE_SKILL_NAMES = frozenset({
-    "brute_force_login",
-    "xss_payload_injection",
-    "directory_bruteforce",
-    "comprehensive_vulnerability_check",
-    "check_xss_reflection",
-    "check_common_vectors",
-})
+ACTIVE_SKILL_NAMES = frozenset(
+    {
+        "brute_force_login",
+        "xss_payload_injection",
+        "directory_bruteforce",
+        "comprehensive_vulnerability_check",
+        "check_xss_reflection",
+        "check_common_vectors",
+        "stored_xss_comment",
+        "port_scan",
+    }
+)
 
 # Auto-review (Cursor-style): allow target-directed work, block host damage.
 # Built-in recon/scanner tools skip the classifier. python_exec / shell_exec /
@@ -226,6 +250,15 @@ LLM_BASE_URL = (
 ).rstrip("/")
 LLM_API_KEY = _env("LLM_API_KEY") or _env("LMSTUDIO_API_KEY") or _env("OMNIROUTE_API_KEY")
 LLM_MODEL = _env("LLM_MODEL") or _env("LMSTUDIO_MODEL")  # empty -> auto-pick
+# Sampling temperature for the agent loop. Tiny tool-routers (e.g. Needle) copy
+# long tool arguments (URLs, hostnames) far more faithfully at 0 (greedy); set
+# LLM_TEMPERATURE=0 when the main model is a router. Default preserves prior behaviour.
+LLM_TEMPERATURE = _env_float("LLM_TEMPERATURE", 0.3)
+# Max characters of a tool result fed back to the model on the next turn. Large
+# results (e.g. a full analyze_site profile) can stall a tiny engine's context
+# processing; capping keeps the loop responsive. The full result still reaches
+# the UI report viewer. 0 = unlimited (default; fine for capable models).
+LLM_TOOL_RESULT_MAX = _env_int("LLM_TOOL_RESULT_MAX", 0)
 
 # OmniRoute (https://github.com/diegosouzapw/OmniRoute) is a self-hosted,
 # OpenAI-compatible AI gateway -- multi-provider routing, fallback, caching.
