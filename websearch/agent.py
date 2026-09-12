@@ -473,6 +473,15 @@ SYSTEM_PROMPT = (
     "- If the user writes `/scan <url>`, call `quick_recon` on that URL.\n"
     "- If a session target scope is set, use it when the user says "
     "'the target', 'this site', or 'scan it' without naming a URL.\n"
+    "- When the user asks to test, scan, attack, or find vulnerabilities in the "
+    "target (an authorised engagement), CALL the security tools directly on the "
+    "target URL -- e.g. `check_common_vectors`, `check_xss_reflection`, "
+    "`xss_payload_injection`, `directory_bruteforce`. Do NOT write example code, "
+    "placeholders like 'your_target.com', or explanations of how to call them: "
+    "actually invoke the tools and report what they return. Only ever use tools "
+    "that are actually provided to you -- never invent tool names.\n"
+    "- If you need the target URL and none was given or scoped, ask for it in "
+    "one line rather than guessing a placeholder.\n"
     "- Prefer `quick_recon` over chaining multiple recon tools, and "
     "`compare_and_summarize` over `compare_sites` when contrasting two sites.\n"
     "- Base your answer on what the tools returned, and cite sources as "
@@ -620,6 +629,16 @@ def expand_slash_command(message: str, scope: dict | None = None) -> str:
             f"Run quick_recon on {target} and summarise all findings by severity. "
             "Highlight anything that needs immediate attention."
         )
+    if cmd in ("/attack", "/vulnscan"):
+        if not target:
+            return "Which URL? Set a target in the scope bar or use `/attack example.com`."
+        # Phrased as a direct action (not "attack ... test for X"), which the
+        # model reliably routes to tool calls instead of explaining.
+        return (
+            f"Run a vulnerability scan on {target}: call check_common_vectors on it, "
+            "then report any XSS, SQL injection or directory-traversal findings the "
+            "tool returns, by severity. Call the tools directly; do not describe them."
+        )
     if cmd == "/compare":
         urls = args.split()
         if len(urls) < 2:
@@ -639,12 +658,45 @@ def expand_slash_command(message: str, scope: dict | None = None) -> str:
     return message
 
 
+async def _force_tool_call(
+    client: httpx.AsyncClient, base_url: str, messages: list[dict],
+    tools: list[dict], model: str,
+) -> list[dict]:
+    """Re-request with tool_choice='required' to force a tool call.
+
+    Used to self-heal a directive (slash command) that the model answered in
+    prose instead of calling a tool. Returns normalised tool_calls, or [].
+    """
+    payload = {
+        "model": model, "messages": messages, "stream": False,
+        "temperature": config.LLM_TEMPERATURE, "tools": tools,
+        "tool_choice": "required",
+    }
+    try:
+        resp = await client.post(f"{base_url}/chat/completions", json=payload)
+        if resp.status_code >= 400:
+            return []
+        msg = (resp.json().get("choices") or [{}])[0].get("message") or {}
+    except (httpx.HTTPError, json.JSONDecodeError):
+        return []
+    out: list[dict] = []
+    for call in msg.get("tool_calls") or []:
+        fn = call.get("function") or {}
+        if fn.get("name"):
+            out.append({
+                "id": call.get("id", ""), "type": "function",
+                "function": {"name": fn["name"], "arguments": fn.get("arguments") or "{}"},
+            })
+    return out
+
+
 async def run_stream(
     messages: list[dict],
     *,
     max_rounds: int = 6,
     model: str | None = None,
     scope: dict | None = None,
+    force_first_tool: bool = False,
 ):
     """Drive the tool-calling loop, yielding events as they happen.
 
@@ -687,13 +739,21 @@ async def run_stream(
                 messages[0]["content"] = scoped
 
         seen: dict[str, str] = {}
+        forced_once = False
         for round_idx in range(max_rounds):
             # On the final round, drop the tools so the model has to answer in
             # prose with what it already has, instead of calling yet another
             # tool and falling off the end with nothing to say.
             final_round = round_idx == max_rounds - 1
+            # Ollama's /v1 endpoint rejects any message with null content
+            # ("invalid message content type: <nil>"); OpenAI/LM Studio tolerate
+            # it. Coerce None -> "" across the whole history before every request.
+            for _m in messages:
+                if _m.get("content") is None:
+                    _m["content"] = ""
             payload: dict = {
-                "model": model, "messages": messages, "temperature": 0.3, "stream": True,
+                "model": model, "messages": messages,
+                "temperature": config.LLM_TEMPERATURE, "stream": True,
             }
             if not final_round:
                 # Re-scan the skills directory each round so a tool the model
@@ -769,6 +829,19 @@ async def run_stream(
                     tool_calls = recovered
                     recovered_flag = True
 
+            # Self-healing: a slash-command directive must act. If the model
+            # answered in prose instead of calling a tool -- common once the
+            # conversation history is full of past prose answers -- retry the
+            # round once with tool_choice="required" to force the call.
+            if (force_first_tool and not tool_calls and not final_round
+                    and not forced_once):
+                forced_once = True
+                forced = await _force_tool_call(
+                    client, base_url, messages, active_tools(), model)
+                if forced:
+                    tool_calls = forced
+                    yield {"type": "note", "text": "forced a tool call for the command"}
+
             # If we streamed text but the round is really a tool call, the streamed
             # text was a preamble/tool-call-text -- tell the UI to drop it.
             if tool_calls and emitted_delta:
@@ -776,7 +849,10 @@ async def run_stream(
             if recovered_flag:
                 yield {"type": "note", "text": "recovered tool call from model text"}
 
-            assistant_msg: dict = {"role": "assistant", "content": content or None}
+            # Use "" not None for empty content: OpenAI accepts null alongside
+            # tool_calls, but Ollama's /v1 endpoint rejects a null content
+            # ("invalid message content type: <nil>") on the next turn.
+            assistant_msg: dict = {"role": "assistant", "content": content or ""}
             if tool_calls:
                 assistant_msg["tool_calls"] = tool_calls
             messages.append(assistant_msg)
@@ -824,8 +900,19 @@ async def run_stream(
                 if report:
                     event["report"] = report
                 yield event
+                # The UI already has the full result (event/report above); cap
+                # what the model sees so a huge tool dump can't stall a tiny engine.
+                model_result = result
+                cap = config.LLM_TOOL_RESULT_MAX
+                if cap and isinstance(result, str) and len(result) > cap:
+                    model_result = (
+                        result[:cap]
+                        + f"\n[...truncated {len(result) - cap} chars; "
+                        "full result shown to the user]"
+                    )
                 messages.append(
-                    {"role": "tool", "tool_call_id": call.get("id", ""), "content": result}
+                    {"role": "tool", "tool_call_id": call.get("id", ""),
+                     "content": model_result}
                 )
 
         # Unreachable in practice: the final round has no tools, so it answers

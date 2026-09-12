@@ -382,6 +382,15 @@ _register_self_extension()
 
 
 def main() -> None:
+    # Skills/tools may emit emoji/unicode; force UTF-8 on the process streams so
+    # the default Windows code page (cp1252) can't crash them. MCP frames and
+    # logs are UTF-8, so this is safe for the stdio transport.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
     logging.getLogger(__name__).info(
         "starting websearch MCP server (backend=%s, cache=%s)",
         config.active_backend(),

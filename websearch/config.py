@@ -246,6 +246,15 @@ LLM_BASE_URL = (
 ).rstrip("/")
 LLM_API_KEY = _env("LLM_API_KEY") or _env("LMSTUDIO_API_KEY") or _env("OMNIROUTE_API_KEY")
 LLM_MODEL = _env("LLM_MODEL") or _env("LMSTUDIO_MODEL")  # empty -> auto-pick
+# Sampling temperature for the agent loop. Tiny tool-routers (e.g. Needle) copy
+# long tool arguments (URLs, hostnames) far more faithfully at 0 (greedy); set
+# LLM_TEMPERATURE=0 when the main model is a router. Default preserves prior behaviour.
+LLM_TEMPERATURE = _env_float("LLM_TEMPERATURE", 0.3)
+# Max characters of a tool result fed back to the model on the next turn. Large
+# results (e.g. a full analyze_site profile) can stall a tiny engine's context
+# processing; capping keeps the loop responsive. The full result still reaches
+# the UI report viewer. 0 = unlimited (default; fine for capable models).
+LLM_TOOL_RESULT_MAX = _env_int("LLM_TOOL_RESULT_MAX", 0)
 
 # OmniRoute (https://github.com/diegosouzapw/OmniRoute) is a self-hosted,
 # OpenAI-compatible AI gateway -- multi-provider routing, fallback, caching.

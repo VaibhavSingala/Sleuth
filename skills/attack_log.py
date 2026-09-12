@@ -1,19 +1,21 @@
 # Global storage for attack records
 ATTACK_LOG = []
 
-def attack_log(url: str, scanner: str, findings: dict) -> bool:
+def attack_log(url: str, scanner: str, findings: dict | None = None) -> bool:
     """
     Records a new attack test result into the global log and checks for duplicates.
 
     Args:
         url (str): The target URL that was scanned.
         scanner (str): The tool used for the scan (e.g., 'wapiti_scan', 'zap_scan').
-        findings (dict): A dictionary containing the results, typically structured as 
+        findings (dict): Optional results dictionary, typically structured as
                          {'category': [list_of_issues], ...} or a summary dict.
+                         Defaults to an empty dict if omitted.
 
     Returns:
         bool: True if the attack was successfully logged, False otherwise (if it's a duplicate).
     """
+    findings = findings or {}
     # Check for exact duplicate (URL + Scanner) before adding
     for record in ATTACK_LOG:
         if record['url'] == url and record['scanner'] == scanner:

@@ -145,6 +145,12 @@ async def chat(request: Request) -> EventSourceResponse:
 
         conv = store.load_or_create(conv_id)
         scope = conv.get("scope", {"target_url": ""})
+        # Action slash commands are directives that must call a tool; flag them
+        # so run_stream can force the call if the model answers in prose (e.g.
+        # after the history fills with past prose answers).
+        _action_cmds = ("/analyze", "/scan", "/attack", "/vulnscan", "/compare")
+        _has_target = bool(scope.get("target_url", "").strip()) or len(msg.split()) > 1
+        force_first_tool = msg.lower().startswith(_action_cmds) and _has_target
         msg = expand_slash_command(msg, scope)
         if not conv.get("title"):
             conv["title"] = msg[:60]
@@ -159,7 +165,8 @@ async def chat(request: Request) -> EventSourceResponse:
         answer_text = ""
         stopped = False
         try:
-            async for event in run_stream(conv["messages"], model=model, scope=scope):
+            async for event in run_stream(conv["messages"], model=model, scope=scope,
+                                          force_first_tool=force_first_tool):
                 etype = event["type"]
                 if etype == "tool_call":
                     turn["steps"].append({"name": event["name"], "args": event.get("args", {})})
@@ -221,6 +228,15 @@ app = Starlette(routes=[
 
 
 def main() -> None:
+    # Authored skills and tools may print emoji/unicode; the default Windows
+    # console code page (cp1252) can't encode those and would crash the skill.
+    # Force UTF-8 on the process streams so any skill's output is safe.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
+
     parser = argparse.ArgumentParser(description="Local tool-using chat web page.")
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (default localhost).")
     parser.add_argument("--port", type=int, default=8765)

@@ -1,8 +1,11 @@
 # Soup fine-tune config: teach Qwen2.5-Coder-3B to author Sleuth skills.
 # Trainer: https://github.com/MakazhanAlpamys/Soup   (soup train --config soup.yaml)
 
-# Instruct variant follows "write a skill that ..." far better than the base.
-base: Qwen/Qwen2.5-Coder-3B-Instruct
+# Uncensored base: the stock Instruct model reflexively refuses security-flavored
+# asks (recon, brute-force/XSS skills), which breaks authorised pentest use. This
+# community de-aligned build removes that refusal reflex while staying a capable
+# Qwen2.5-Coder. Sleuth's own auto_review guard + active-skill gating still apply.
+base: bappi/Qwen2.5-Coder-3B-Uncensored
 
 task: sft
 
