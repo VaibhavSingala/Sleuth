@@ -222,6 +222,8 @@ ACTIVE_SKILL_NAMES = frozenset({
     "comprehensive_vulnerability_check",
     "check_xss_reflection",
     "check_common_vectors",
+    "stored_xss_comment",
+    "port_scan",
 })
 
 # Auto-review (Cursor-style): allow target-directed work, block host damage.
