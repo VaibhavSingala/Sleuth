@@ -6,13 +6,39 @@ from urllib.parse import urlparse
 # Well-known ports -> service name, used both as the default scan set and to
 # label results.
 _COMMON = {
-    21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns", 80: "http",
-    110: "pop3", 111: "rpcbind", 135: "msrpc", 139: "netbios", 143: "imap",
-    443: "https", 445: "smb", 465: "smtps", 587: "submission", 993: "imaps",
-    995: "pop3s", 1433: "mssql", 1521: "oracle", 2049: "nfs", 3000: "dev-http",
-    3306: "mysql", 3389: "rdp", 5432: "postgres", 5900: "vnc", 6379: "redis",
-    8000: "http-alt", 8080: "http-proxy", 8443: "https-alt", 8888: "http-alt",
-    9200: "elasticsearch", 11211: "memcached", 27017: "mongodb",
+    21: "ftp",
+    22: "ssh",
+    23: "telnet",
+    25: "smtp",
+    53: "dns",
+    80: "http",
+    110: "pop3",
+    111: "rpcbind",
+    135: "msrpc",
+    139: "netbios",
+    143: "imap",
+    443: "https",
+    445: "smb",
+    465: "smtps",
+    587: "submission",
+    993: "imaps",
+    995: "pop3s",
+    1433: "mssql",
+    1521: "oracle",
+    2049: "nfs",
+    3000: "dev-http",
+    3306: "mysql",
+    3389: "rdp",
+    5432: "postgres",
+    5900: "vnc",
+    6379: "redis",
+    8000: "http-alt",
+    8080: "http-proxy",
+    8443: "https-alt",
+    8888: "http-alt",
+    9200: "elasticsearch",
+    11211: "memcached",
+    27017: "mongodb",
 }
 
 _MAX_PORTS = 5000  # safety cap so one call can't scan the whole 65k range slowly
@@ -53,10 +79,16 @@ def port_scan(target: str, ports: str = "", timeout: float = 1.0) -> dict:
         and scan counts -- or an {"error": ...} dict.
     """
     if os.environ.get("SLEUTH_ALLOW_ACTIVE_SKILLS", "").strip().lower() not in (
-        "1", "true", "yes", "on",
+        "1",
+        "true",
+        "yes",
+        "on",
     ):
-        return {"ok": False, "error": "Skill 'port_scan' is disabled. "
-                "Set SLEUTH_ALLOW_ACTIVE_SKILLS=true for authorised targets only."}
+        return {
+            "ok": False,
+            "error": "Skill 'port_scan' is disabled. "
+            "Set SLEUTH_ALLOW_ACTIVE_SKILLS=true for authorised targets only.",
+        }
 
     host = urlparse(target if "://" in target else "//" + target).hostname or target
     try:
@@ -68,8 +100,7 @@ def port_scan(target: str, ports: str = "", timeout: float = 1.0) -> dict:
     if not port_list:
         return {"error": f"no valid ports parsed from '{ports}'"}
     if len(port_list) > _MAX_PORTS:
-        return {"error": f"too many ports ({len(port_list)} > {_MAX_PORTS}); "
-                "narrow the range."}
+        return {"error": f"too many ports ({len(port_list)} > {_MAX_PORTS}); narrow the range."}
 
     def _check(port: int) -> int | None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -94,8 +125,10 @@ def port_scan(target: str, ports: str = "", timeout: float = 1.0) -> dict:
         "ports_scanned": len(port_list),
         "open_count": len(open_ports),
         "open": [{"port": p, "service": _COMMON.get(p, "unknown")} for p in open_ports],
-        "note": ("Open ports found above; closed/filtered ports are omitted."
-                 if open_ports else
-                 "No open ports among those scanned (host may be firewalled or "
-                 "only serving on ports not in the set)."),
+        "note": (
+            "Open ports found above; closed/filtered ports are omitted."
+            if open_ports
+            else "No open ports among those scanned (host may be firewalled or "
+            "only serving on ports not in the set)."
+        ),
     }

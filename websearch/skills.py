@@ -37,13 +37,13 @@ import subprocess
 import sys
 import traceback
 import typing
-
-import httpx
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from . import config, skill_lang, auto_review
+import httpx
+
+from . import auto_review, config, skill_lang
 
 log = logging.getLogger(__name__)
 
@@ -61,12 +61,20 @@ def reserve(names) -> None:
 # --- signature -> JSON schema --------------------------------------------
 
 _JSON_TYPES = {
-    str: "string", int: "integer", float: "number",
-    bool: "boolean", list: "array", dict: "object",
+    str: "string",
+    int: "integer",
+    float: "number",
+    bool: "boolean",
+    list: "array",
+    dict: "object",
 }
 _JSON_TYPE_NAMES = {
-    "str": "string", "int": "integer", "float": "number",
-    "bool": "boolean", "list": "array", "dict": "object",
+    "str": "string",
+    "int": "integer",
+    "float": "number",
+    "bool": "boolean",
+    "list": "array",
+    "dict": "object",
 }
 
 
@@ -131,8 +139,12 @@ def _signature_str(fn) -> str:
 
 
 _JSON_TO_PY = {
-    "string": str, "integer": int, "number": float,
-    "boolean": bool, "array": list, "object": dict,
+    "string": str,
+    "integer": int,
+    "number": float,
+    "boolean": bool,
+    "array": list,
+    "object": dict,
 }
 
 
@@ -149,12 +161,14 @@ def _bind_schema_signature(fn, schema: dict, name: str):
         default = inspect.Parameter.empty
         if pname not in required or "default" in spec:
             default = spec.get("default", None)
-        params.append(inspect.Parameter(
-            pname,
-            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            default=default,
-            annotation=_JSON_TO_PY.get(json_type, str),
-        ))
+        params.append(
+            inspect.Parameter(
+                pname,
+                kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=default,
+                annotation=_JSON_TO_PY.get(json_type, str),
+            )
+        )
     try:
         fn.__signature__ = inspect.Signature(params)
     except (TypeError, ValueError):
@@ -168,8 +182,15 @@ def _bind_schema_signature(fn, schema: dict, name: str):
 
 class Skill:
     __slots__ = (
-        "name", "path", "fn", "is_async", "schema", "description",
-        "mtime", "error", "language",
+        "description",
+        "error",
+        "fn",
+        "is_async",
+        "language",
+        "mtime",
+        "name",
+        "path",
+        "schema",
     )
 
     def __init__(self, name: str, path: Path):
@@ -341,7 +362,7 @@ async def _invoke_skill(skill: Skill, kwargs: dict) -> str:
             value = await asyncio.wait_for(
                 asyncio.to_thread(skill.fn, **kwargs), timeout=config.SKILL_TIMEOUT
             )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return f"Error: skill '{skill.name}' timed out after {config.SKILL_TIMEOUT:.0f}s."
     except TypeError as exc:
         return f"Error: bad arguments for skill '{skill.name}': {exc}"
@@ -353,6 +374,7 @@ async def _invoke_skill(skill: Skill, kwargs: dict) -> str:
 def _skill_wrapper(skill: Skill):
     async def wrapper(**kwargs):
         return await _invoke_skill(skill, kwargs)
+
     wrapper.__name__ = skill.name
     wrapper.__doc__ = skill.description
     if skill.fn is not None:
@@ -371,12 +393,20 @@ def _skill_wrapper(skill: Skill):
 # tool that is not in scope). Runtime errors from the placeholder args (bad
 # URL, missing API key, ...) are NOT here — they must not fail a good skill.
 _STRUCTURAL_EXC = (
-    NameError, UnboundLocalError, ImportError, IndentationError, RecursionError,
+    NameError,
+    UnboundLocalError,
+    ImportError,
+    IndentationError,
+    RecursionError,
 )
 
 _DUMMY_BY_TYPE = {
-    "string": "test", "integer": 1, "number": 1.0,
-    "boolean": True, "array": [], "object": {},
+    "string": "test",
+    "integer": 1,
+    "number": 1.0,
+    "boolean": True,
+    "array": [],
+    "object": {},
 }
 
 
@@ -409,9 +439,7 @@ def _smoke_test(skill: Skill) -> tuple[str, str]:
 
     def _run() -> None:
         try:
-            box["value"] = (
-                asyncio.run(skill.fn(**args)) if skill.is_async else skill.fn(**args)
-            )
+            box["value"] = asyncio.run(skill.fn(**args)) if skill.is_async else skill.fn(**args)
         except Exception as exc:  # classified below into pass/fail/inconclusive
             box["exc"] = exc
 
@@ -421,8 +449,10 @@ def _smoke_test(skill: Skill) -> tuple[str, str]:
     thread.start()
     thread.join(config.SKILL_SMOKE_TIMEOUT)
     if thread.is_alive():
-        return ("fail", f"no return within {config.SKILL_SMOKE_TIMEOUT:.0f}s "
-                        "(possible hang or blocking loop)")
+        return (
+            "fail",
+            f"no return within {config.SKILL_SMOKE_TIMEOUT:.0f}s (possible hang or blocking loop)",
+        )
 
     exc = box.get("exc")
     if exc is None:
@@ -431,8 +461,10 @@ def _smoke_test(skill: Skill) -> tuple[str, str]:
         return ("inconclusive", f"placeholder args did not fit the signature: {exc}")
     if isinstance(exc, _STRUCTURAL_EXC):
         return ("fail", f"{type(exc).__name__}: {exc}")
-    return ("inconclusive",
-            f"{type(exc).__name__} (likely from placeholder args): {str(exc)[:160]}")
+    return (
+        "inconclusive",
+        f"{type(exc).__name__} (likely from placeholder args): {str(exc)[:160]}",
+    )
 
 
 # --- meta-tools: skill management ----------------------------------------
@@ -487,9 +519,7 @@ def _author_skill_code(name: str, description: str) -> str:
     Returns the generated source, or raises RuntimeError on any transport or
     parse failure so the caller can report it to the model.
     """
-    instruction = (
-        f"Write a Sleuth skill named `{name}` that {description.strip().rstrip('.')}."
-    )
+    instruction = f"Write a Sleuth skill named `{name}` that {description.strip().rstrip('.')}."
     payload = {
         "model": config.SKILL_AUTHOR_MODEL,
         "messages": [
@@ -503,14 +533,12 @@ def _author_skill_code(name: str, description: str) -> str:
     url = f"{config.SKILL_AUTHOR_BASE_URL}/chat/completions"
     headers = {"Authorization": f"Bearer {config.SKILL_AUTHOR_API_KEY}"}
     try:
-        resp = httpx.post(url, json=payload, headers=headers,
-                          timeout=config.SKILL_AUTHOR_TIMEOUT)
+        resp = httpx.post(url, json=payload, headers=headers, timeout=config.SKILL_AUTHOR_TIMEOUT)
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"]
     except httpx.HTTPError as exc:
         raise RuntimeError(
-            f"could not reach the skill-author model at "
-            f"{config.SKILL_AUTHOR_BASE_URL} ({exc})"
+            f"could not reach the skill-author model at {config.SKILL_AUTHOR_BASE_URL} ({exc})"
         ) from exc
     except (KeyError, ValueError, TypeError) as exc:
         raise RuntimeError(f"unexpected skill-author response: {exc}") from exc
@@ -673,13 +701,9 @@ def skill_list() -> str:
         skill = REGISTRY.skills[name]
         lang = getattr(skill, "language", "python")
         if skill.error:
-            lines.append(
-                f"- {name} [{lang}]  [BROKEN] {skill.error.splitlines()[-1][:80]}"
-            )
+            lines.append(f"- {name} [{lang}]  [BROKEN] {skill.error.splitlines()[-1][:80]}")
         else:
-            lines.append(
-                f"- {name}{_signature_str(skill.fn)} [{lang}] — {skill.description}"
-            )
+            lines.append(f"- {name}{_signature_str(skill.fn)} [{lang}] — {skill.description}")
     return "\n".join(lines)
 
 
@@ -693,19 +717,19 @@ def skill_catalog() -> list[dict]:
         skill = REGISTRY.skills[name]
         props = skill.schema.get("properties", {}) if skill.schema else {}
         params = list(props.keys())
-        example_args = ", ".join(
-            f'{p}="..."' for p in params[:3]
-        )
+        example_args = ", ".join(f'{p}="..."' for p in params[:3])
         example = f"{name}({example_args})" if example_args else f"{name}()"
-        catalog.append({
-            "name": name,
-            "description": skill.description or f"Skill '{name}'.",
-            "language": getattr(skill, "language", "python"),
-            "ok": skill.error is None and skill.fn is not None,
-            "parameters": params,
-            "example": example,
-            "error": (skill.error or "")[:120] if skill.error else "",
-        })
+        catalog.append(
+            {
+                "name": name,
+                "description": skill.description or f"Skill '{name}'.",
+                "language": getattr(skill, "language", "python"),
+                "ok": skill.error is None and skill.fn is not None,
+                "parameters": params,
+                "example": example,
+                "error": (skill.error or "")[:120] if skill.error else "",
+            }
+        )
     return catalog
 
 
@@ -751,7 +775,7 @@ def _resolve_in_root(path: str) -> Path | None:
 
 def _backup_path(target: Path) -> Path:
     rel = target.resolve().relative_to(config.CODE_ROOT.resolve())
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
     flat = str(rel).replace("/", "__").replace("\\", "__")
     return config.BACKUP_DIR / f"{flat}.{stamp}.bak"
 
@@ -795,8 +819,10 @@ def code_search(pattern: str, glob: str = "*.py", max_results: int = 60) -> str:
     root = config.CODE_ROOT.resolve()
     hits: list[str] = []
     for file in root.rglob(glob):
-        if any(part in {"__pycache__", ".backups", ".cache", ".git", "conversations"}
-               for part in file.parts):
+        if any(
+            part in {"__pycache__", ".backups", ".cache", ".git", "conversations"}
+            for part in file.parts
+        ):
             continue
         if not file.is_file():
             continue
@@ -928,7 +954,7 @@ async def python_exec(code: str) -> str:
         return await asyncio.wait_for(
             asyncio.to_thread(_run_python_sync, code), timeout=config.EXEC_TIMEOUT
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return (
             f"python_exec timed out after {config.EXEC_TIMEOUT:.0f}s. "
             "(The code may still be running in a background thread.)"
@@ -947,8 +973,12 @@ async def shell_exec(command: str, timeout: float = 0) -> str:
     def _run() -> str:
         try:
             proc = subprocess.run(
-                command, shell=True, cwd=str(config.CODE_ROOT),
-                capture_output=True, text=True, timeout=limit,
+                command,
+                shell=True,
+                cwd=str(config.CODE_ROOT),
+                capture_output=True,
+                text=True,
+                timeout=limit,
             )
         except subprocess.TimeoutExpired:
             return f"Command timed out after {limit:.0f}s."
@@ -966,7 +996,8 @@ async def shell_exec(command: str, timeout: float = 0) -> str:
 
 _META_SCHEMAS: list[dict] = [
     {
-        "name": "skill_write", "group": "skills",
+        "name": "skill_write",
+        "group": "skills",
         "description": (
             "Author a new tool for yourself when a capability you need doesn't "
             "exist yet. Provide `code` (full source), OR provide just `name` + "
@@ -980,31 +1011,43 @@ _META_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "name": {"type": "string",
-                         "description": "lower_snake_case tool name (also the file stem)."},
-                "code": {"type": "string",
-                         "description": "Full source of the skill. Omit to have it "
-                                        "written from `description`."},
-                "description": {"type": "string",
-                                "description": "What the skill should do. Required if "
-                                               "`code` is omitted (used to author it); "
-                                               "otherwise an optional human summary."},
-                "language": {"type": "string",
-                             "description": "python, javascript, bash, ruby, perl, php, go, lua, r, or auto to detect.",
-                             "default": "auto"},
-                "parameters": {"type": "string",
-                               "description": "Optional JSON object of tool args, e.g. {\"f\":\"number\"}, when they cannot be inferred."},
+                "name": {
+                    "type": "string",
+                    "description": "lower_snake_case tool name (also the file stem).",
+                },
+                "code": {
+                    "type": "string",
+                    "description": "Full source of the skill. Omit to have it "
+                    "written from `description`.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "What the skill should do. Required if "
+                    "`code` is omitted (used to author it); "
+                    "otherwise an optional human summary.",
+                },
+                "language": {
+                    "type": "string",
+                    "description": "python, javascript, bash, ruby, perl, php, go, lua, r, or auto to detect.",
+                    "default": "auto",
+                },
+                "parameters": {
+                    "type": "string",
+                    "description": 'Optional JSON object of tool args, e.g. {"f":"number"}, when they cannot be inferred.',
+                },
             },
             "required": ["name"],
         },
     },
     {
-        "name": "skill_list", "group": "skills",
+        "name": "skill_list",
+        "group": "skills",
         "description": "List the skills you have authored, with signatures and status.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
-        "name": "skill_read", "group": "skills",
+        "name": "skill_read",
+        "group": "skills",
         "description": "Read the source of one of your authored skills to edit it.",
         "parameters": {
             "type": "object",
@@ -1013,7 +1056,8 @@ _META_SCHEMAS: list[dict] = [
         },
     },
     {
-        "name": "skill_delete", "group": "skills",
+        "name": "skill_delete",
+        "group": "skills",
         "description": "Delete one of your authored skills.",
         "parameters": {
             "type": "object",
@@ -1022,7 +1066,8 @@ _META_SCHEMAS: list[dict] = [
         },
     },
     {
-        "name": "code_read", "group": "code",
+        "name": "code_read",
+        "group": "code",
         "description": "Read a source file of this project (with line numbers) so you can edit it.",
         "parameters": {
             "type": "object",
@@ -1034,20 +1079,25 @@ _META_SCHEMAS: list[dict] = [
         },
     },
     {
-        "name": "code_search", "group": "code",
+        "name": "code_search",
+        "group": "code",
         "description": "Regex-search the project's source to find where something is defined.",
         "parameters": {
             "type": "object",
             "properties": {
                 "pattern": {"type": "string", "description": "Regular expression."},
-                "glob": {"type": "string", "description": "Filename glob (default *.py).",
-                         "default": "*.py"},
+                "glob": {
+                    "type": "string",
+                    "description": "Filename glob (default *.py).",
+                    "default": "*.py",
+                },
             },
             "required": ["pattern"],
         },
     },
     {
-        "name": "code_write", "group": "code_edit",
+        "name": "code_write",
+        "group": "code_edit",
         "description": (
             "Overwrite a source file of THIS project. The prior version is "
             "snapshotted first, and a Python file that no longer parses is "
@@ -1063,16 +1113,20 @@ _META_SCHEMAS: list[dict] = [
         },
     },
     {
-        "name": "code_revert", "group": "code_edit",
+        "name": "code_revert",
+        "group": "code_edit",
         "description": "Undo your last code_write to a file by restoring its newest snapshot.",
         "parameters": {
             "type": "object",
-            "properties": {"path": {"type": "string", "description": "Path relative to the project root."}},
+            "properties": {
+                "path": {"type": "string", "description": "Path relative to the project root."}
+            },
             "required": ["path"],
         },
     },
     {
-        "name": "python_exec", "group": "exec",
+        "name": "python_exec",
+        "group": "exec",
         "description": (
             "Run Python in-process against the live package and get its output. "
             "Good for trying a skill you just wrote, or one-off computation. The "
@@ -1087,7 +1141,8 @@ _META_SCHEMAS: list[dict] = [
         },
     },
     {
-        "name": "shell_exec", "group": "exec",
+        "name": "shell_exec",
+        "group": "exec",
         "description": (
             "Run a shell command from the project root and return its output. "
             "Auto-review blocks host-damaging commands; work aimed at a remote "
@@ -1105,11 +1160,16 @@ _META_SCHEMAS: list[dict] = [
 ]
 
 _META_HANDLERS = {
-    "skill_write": skill_write, "skill_list": skill_list,
-    "skill_read": skill_read, "skill_delete": skill_delete,
-    "code_read": code_read, "code_search": code_search,
-    "code_write": code_write, "code_revert": code_revert,
-    "python_exec": python_exec, "shell_exec": shell_exec,
+    "skill_write": skill_write,
+    "skill_list": skill_list,
+    "skill_read": skill_read,
+    "skill_delete": skill_delete,
+    "code_read": code_read,
+    "code_search": code_search,
+    "code_write": code_write,
+    "code_revert": code_revert,
+    "python_exec": python_exec,
+    "shell_exec": shell_exec,
 }
 
 reserve(_META_HANDLERS.keys())
@@ -1131,14 +1191,16 @@ def meta_tool_schemas() -> list[dict]:
     for spec in _META_SCHEMAS:
         if not _group_enabled(spec["group"]):
             continue
-        out.append({
-            "type": "function",
-            "function": {
-                "name": spec["name"],
-                "description": spec["description"],
-                "parameters": spec["parameters"],
-            },
-        })
+        out.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": spec["name"],
+                    "description": spec["description"],
+                    "parameters": spec["parameters"],
+                },
+            }
+        )
     return out
 
 
@@ -1157,14 +1219,16 @@ def skill_tool_schemas() -> list[dict]:
         return []
     out = []
     for skill in REGISTRY.valid():
-        out.append({
-            "type": "function",
-            "function": {
-                "name": skill.name,
-                "description": skill.description,
-                "parameters": skill.schema,
-            },
-        })
+        out.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": skill.name,
+                    "description": skill.description,
+                    "parameters": skill.schema,
+                },
+            }
+        )
     return out
 
 
@@ -1204,16 +1268,17 @@ def _cli() -> int:
     p_new = sub.add_parser("write", help="Create a skill from a source file on disk.")
     p_new.add_argument("name")
     p_new.add_argument("file", help="Path to the skill source (extension selects language).")
-    p_new.add_argument("--language", default="auto",
-                       help="python/javascript/bash/... or auto (default: from file extension).")
-    p_new.add_argument("--parameters", default="",
-                       help="JSON object describing tool arguments.")
+    p_new.add_argument(
+        "--language",
+        default="auto",
+        help="python/javascript/bash/... or auto (default: from file extension).",
+    )
+    p_new.add_argument("--parameters", default="", help="JSON object describing tool arguments.")
     p_del = sub.add_parser("delete", help="Delete a skill.")
     p_del.add_argument("name")
     p_run = sub.add_parser("call", help="Invoke a skill with JSON arguments.")
     p_run.add_argument("name")
-    p_run.add_argument("json_args", nargs="?", default="{}",
-                       help='e.g. \'{"city": "Paris"}\'')
+    p_run.add_argument("json_args", nargs="?", default="{}", help='e.g. \'{"city": "Paris"}\'')
     p_py = sub.add_parser("exec", help="Run Python in-process (python_exec).")
     p_py.add_argument("code")
     args = parser.parse_args()
@@ -1233,6 +1298,7 @@ def _cli() -> int:
         hint = args.language
         if hint in ("auto", "", None):
             from . import skill_lang as _sl
+
             hint = _sl.language_for_ext(Path(args.file).suffix) or "auto"
         print(skill_write(args.name, code, language=hint, parameters=args.parameters))
         return 0

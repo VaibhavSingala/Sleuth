@@ -21,11 +21,11 @@ import inspect
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
-from . import config, llm, skills, auto_review
+from . import auto_review, config, llm, skills
 from .analyze import analyze_site, compare_sites
 from .burp.reports import parse_report as burp_parse_report
 from .burp.scan import scan_status as burp_scan_status
@@ -178,12 +178,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "calculate",
-            "description": ("Evaluate an arithmetic/math expression exactly. Use for any "
-                            "calculation instead of mental math."),
+            "description": (
+                "Evaluate an arithmetic/math expression exactly. Use for any "
+                "calculation instead of mental math."
+            ),
             "parameters": {
                 "type": "object",
-                "properties": {"expression": {"type": "string",
-                               "description": "e.g. '(1234*5678)/3' or 'sqrt(2)+log(100)'."}},
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "e.g. '(1234*5678)/3' or 'sqrt(2)+log(100)'.",
+                    }
+                },
                 "required": ["expression"],
             },
         },
@@ -278,8 +284,10 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "zap_feed",
-            "description": ("Route recon (endpoints + subdomains) through OWASP ZAP's "
-                            "proxy for free passive scanning. Needs ZAP_PROXY."),
+            "description": (
+                "Route recon (endpoints + subdomains) through OWASP ZAP's "
+                "proxy for free passive scanning. Needs ZAP_PROXY."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {"url": {"type": "string", "description": "Site to feed into ZAP."}},
@@ -303,15 +311,19 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "zap_scan",
-            "description": ("Spider + ACTIVE OWASP ZAP scan of a URL (free scanner). Only "
-                            "for authorised targets; disabled unless ZAP_ALLOW_ACTIVE_SCAN=true."),
+            "description": (
+                "Spider + ACTIVE OWASP ZAP scan of a URL (free scanner). Only "
+                "for authorised targets; disabled unless ZAP_ALLOW_ACTIVE_SCAN=true."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "Target URL to scan."},
-                    "wait": {"type": "boolean",
-                             "description": "Wait and summarise (true) or return a scan id (false).",
-                             "default": True},
+                    "wait": {
+                        "type": "boolean",
+                        "description": "Wait and summarise (true) or return a scan id (false).",
+                        "default": True,
+                    },
                 },
                 "required": ["url"],
             },
@@ -336,15 +348,19 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "wapiti_scan",
-            "description": ("Actively scan a URL with Wapiti, a free pip-installable "
-                            "scanner (no Burp Pro / ZAP needed). Authorised targets only; "
-                            "disabled unless WAPITI_ALLOW_ACTIVE_SCAN=true."),
+            "description": (
+                "Actively scan a URL with Wapiti, a free pip-installable "
+                "scanner (no Burp Pro / ZAP needed). Authorised targets only; "
+                "disabled unless WAPITI_ALLOW_ACTIVE_SCAN=true."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "Target URL to scan."},
-                    "max_time": {"type": "integer",
-                                 "description": "Time cap in seconds (0 = default)."},
+                    "max_time": {
+                        "type": "integer",
+                        "description": "Time cap in seconds (0 = default).",
+                    },
                 },
                 "required": ["url"],
             },
@@ -556,11 +572,13 @@ def _parse_text_tool_calls(content: str) -> list[dict]:
         if key in seen:  # dedupe a call quoted twice in the same message
             continue
         seen.add(key)
-        calls.append({
-            "id": f"text_call_{i}",
-            "type": "function",
-            "function": {"name": name, "arguments": json.dumps(args)},
-        })
+        calls.append(
+            {
+                "id": f"text_call_{i}",
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(args)},
+            }
+        )
     return calls
 
 
@@ -624,7 +642,9 @@ def expand_slash_command(message: str, scope: dict | None = None) -> str:
         )
     if cmd == "/scan":
         if not target:
-            return "Which URL should I scan? Set a target in the scope bar or use `/scan example.com`."
+            return (
+                "Which URL should I scan? Set a target in the scope bar or use `/scan example.com`."
+            )
         return (
             f"Run quick_recon on {target} and summarise all findings by severity. "
             "Highlight anything that needs immediate attention."
@@ -659,8 +679,11 @@ def expand_slash_command(message: str, scope: dict | None = None) -> str:
 
 
 async def _force_tool_call(
-    client: httpx.AsyncClient, base_url: str, messages: list[dict],
-    tools: list[dict], model: str,
+    client: httpx.AsyncClient,
+    base_url: str,
+    messages: list[dict],
+    tools: list[dict],
+    model: str,
 ) -> list[dict]:
     """Re-request with tool_choice='required' to force a tool call.
 
@@ -668,8 +691,11 @@ async def _force_tool_call(
     prose instead of calling a tool. Returns normalised tool_calls, or [].
     """
     payload = {
-        "model": model, "messages": messages, "stream": False,
-        "temperature": config.LLM_TEMPERATURE, "tools": tools,
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "temperature": config.LLM_TEMPERATURE,
+        "tools": tools,
         "tool_choice": "required",
     }
     try:
@@ -683,10 +709,13 @@ async def _force_tool_call(
     for call in msg.get("tool_calls") or []:
         fn = call.get("function") or {}
         if fn.get("name"):
-            out.append({
-                "id": call.get("id", ""), "type": "function",
-                "function": {"name": fn["name"], "arguments": fn.get("arguments") or "{}"},
-            })
+            out.append(
+                {
+                    "id": call.get("id", ""),
+                    "type": "function",
+                    "function": {"name": fn["name"], "arguments": fn.get("arguments") or "{}"},
+                }
+            )
     return out
 
 
@@ -733,7 +762,7 @@ async def run_stream(
         yield {"type": "meta", "provider": provider, "model": model}
 
         if scope and scope.get("target_url"):
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            today = datetime.now(UTC).strftime("%Y-%m-%d")
             scoped = system_prompt(today, scope)
             if messages and messages[0].get("role") == "system":
                 messages[0]["content"] = scoped
@@ -752,8 +781,10 @@ async def run_stream(
                 if _m.get("content") is None:
                     _m["content"] = ""
             payload: dict = {
-                "model": model, "messages": messages,
-                "temperature": config.LLM_TEMPERATURE, "stream": True,
+                "model": model,
+                "messages": messages,
+                "temperature": config.LLM_TEMPERATURE,
+                "stream": True,
             }
             if not final_round:
                 # Re-scan the skills directory each round so a tool the model
@@ -772,8 +803,10 @@ async def run_stream(
                 ) as resp:
                     if resp.status_code >= 400:
                         await resp.aread()
-                        yield {"type": "error",
-                               "text": f"{provider} returned {resp.status_code}: {llm.error_text(resp)}"}
+                        yield {
+                            "type": "error",
+                            "text": f"{provider} returned {resp.status_code}: {llm.error_text(resp)}",
+                        }
                         return
                     async for line in resp.aiter_lines():
                         line = line.strip()
@@ -814,9 +847,13 @@ async def run_stream(
             content = "".join(content_parts)
             reasoning = "".join(reasoning_parts)
             tool_calls = [
-                {"id": s["id"] or f"call_{i}", "type": "function",
-                 "function": {"name": s["name"], "arguments": s["arguments"] or "{}"}}
-                for i, s in sorted(tool_acc.items()) if s["name"]
+                {
+                    "id": s["id"] or f"call_{i}",
+                    "type": "function",
+                    "function": {"name": s["name"], "arguments": s["arguments"] or "{}"},
+                }
+                for i, s in sorted(tool_acc.items())
+                if s["name"]
             ]
 
             # Some local models emit tool calls as text (<tool_call>{...}</tool_call>
@@ -833,11 +870,9 @@ async def run_stream(
             # answered in prose instead of calling a tool -- common once the
             # conversation history is full of past prose answers -- retry the
             # round once with tool_choice="required" to force the call.
-            if (force_first_tool and not tool_calls and not final_round
-                    and not forced_once):
+            if force_first_tool and not tool_calls and not final_round and not forced_once:
                 forced_once = True
-                forced = await _force_tool_call(
-                    client, base_url, messages, active_tools(), model)
+                forced = await _force_tool_call(client, base_url, messages, active_tools(), model)
                 if forced:
                     tool_calls = forced
                     yield {"type": "note", "text": "forced a tool call for the command"}
@@ -871,8 +906,12 @@ async def run_stream(
                     arguments = json.loads(call["function"]["arguments"] or "{}")
                 except json.JSONDecodeError:
                     arguments = {}
-                yield {"type": "tool_call", "name": name, "args": arguments,
-                       "recovered": recovered_flag}
+                yield {
+                    "type": "tool_call",
+                    "name": name,
+                    "args": arguments,
+                    "recovered": recovered_flag,
+                }
 
                 # A model that gets an unhelpful result often calls the exact
                 # same thing again. Don't re-run it -- return the prior result
@@ -906,18 +945,19 @@ async def run_stream(
                 cap = config.LLM_TOOL_RESULT_MAX
                 if cap and isinstance(result, str) and len(result) > cap:
                     model_result = (
-                        result[:cap]
-                        + f"\n[...truncated {len(result) - cap} chars; "
+                        result[:cap] + f"\n[...truncated {len(result) - cap} chars; "
                         "full result shown to the user]"
                     )
                 messages.append(
-                    {"role": "tool", "tool_call_id": call.get("id", ""),
-                     "content": model_result}
+                    {"role": "tool", "tool_call_id": call.get("id", ""), "content": model_result}
                 )
 
         # Unreachable in practice: the final round has no tools, so it answers
         # above. Kept as a defensive backstop.
-        yield {"type": "answer", "text": "Stopped after too many tool rounds without a final answer."}
+        yield {
+            "type": "answer",
+            "text": "Stopped after too many tool rounds without a final answer.",
+        }
 
 
 async def chat(
@@ -949,7 +989,7 @@ async def chat(
 
 
 async def ask(question: str, verbose: bool = True) -> str:
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     return await chat(
         [
             {"role": "system", "content": system_prompt(today)},
@@ -960,7 +1000,7 @@ async def ask(question: str, verbose: bool = True) -> str:
 
 
 async def _repl() -> None:
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     messages = [{"role": "system", "content": system_prompt(today)}]
     print("Search-enabled chat. Ctrl-C or 'exit' to quit.\n")
     while True:

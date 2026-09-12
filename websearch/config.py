@@ -215,16 +215,18 @@ SKILL_AUTHOR_TIMEOUT = _env_float("SLEUTH_SKILL_AUTHOR_TIMEOUT", 120.0)
 # checks). Same idea as ZAP_ALLOW_ACTIVE_SCAN: the files stay in the repo for
 # authorised lab use, but they are not registered as tools until this is true.
 ACTIVE_SKILLS_ENABLED = _env_bool("SLEUTH_ALLOW_ACTIVE_SKILLS", False)
-ACTIVE_SKILL_NAMES = frozenset({
-    "brute_force_login",
-    "xss_payload_injection",
-    "directory_bruteforce",
-    "comprehensive_vulnerability_check",
-    "check_xss_reflection",
-    "check_common_vectors",
-    "stored_xss_comment",
-    "port_scan",
-})
+ACTIVE_SKILL_NAMES = frozenset(
+    {
+        "brute_force_login",
+        "xss_payload_injection",
+        "directory_bruteforce",
+        "comprehensive_vulnerability_check",
+        "check_xss_reflection",
+        "check_common_vectors",
+        "stored_xss_comment",
+        "port_scan",
+    }
+)
 
 # Auto-review (Cursor-style): allow target-directed work, block host damage.
 # Built-in recon/scanner tools skip the classifier. python_exec / shell_exec /

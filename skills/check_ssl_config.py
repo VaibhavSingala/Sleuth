@@ -24,8 +24,11 @@ def check_ssl_config(url: str) -> dict:
     if not host:
         return {"error": f"could not parse a host from '{url}'"}
     if parsed.scheme != "https":
-        return {"host": host, "https": False,
-                "note": "URL is not HTTPS; there is no TLS layer to inspect."}
+        return {
+            "host": host,
+            "https": False,
+            "note": "URL is not HTTPS; there is no TLS layer to inspect.",
+        }
 
     result: dict = {"host": host, "port": port, "https": True}
 
@@ -45,6 +48,7 @@ def check_ssl_config(url: str) -> dict:
 
     # 2. Certificate details (getpeercert returns nested tuples).
     if cert:
+
         def _flatten(rdns) -> dict:
             out: dict = {}
             for rdn in rdns:

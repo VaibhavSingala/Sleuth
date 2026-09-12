@@ -20,21 +20,27 @@ def wifi_scan(band: str = "") -> dict:
         {"error": ...} dict.
     """
     if platform.system() != "Windows":
-        return {"error": "wifi_scan relies on Windows netsh. On Linux, use "
-                "'iw dev <if> scan' or airodump-ng (monitor mode) instead."}
+        return {
+            "error": "wifi_scan relies on Windows netsh. On Linux, use "
+            "'iw dev <if> scan' or airodump-ng (monitor mode) instead."
+        }
 
     try:
         proc = subprocess.run(
             ["netsh", "wlan", "show", "networks", "mode=bssid"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return {"error": f"netsh failed: {exc}"}
 
     text = proc.stdout or ""
     if "SSID" not in text:
-        return {"error": "no Wi-Fi interface found or no networks visible",
-                "detail": text.strip()[:200] or proc.stderr.strip()[:200]}
+        return {
+            "error": "no Wi-Fi interface found or no networks visible",
+            "detail": text.strip()[:200] or proc.stderr.strip()[:200],
+        }
 
     def _val(line: str) -> str:
         return line.split(":", 1)[1].strip() if ":" in line else ""
@@ -46,8 +52,12 @@ def wifi_scan(band: str = "") -> dict:
         line = raw.strip()
         ssid_m = re.match(r"SSID \d+\s*:\s*(.*)$", line)
         if ssid_m:
-            cur = {"ssid": ssid_m.group(1).strip() or "<hidden>",
-                   "auth": "", "encryption": "", "bssids": []}
+            cur = {
+                "ssid": ssid_m.group(1).strip() or "<hidden>",
+                "auth": "",
+                "encryption": "",
+                "bssids": [],
+            }
             networks.append(cur)
             curb = None
             continue
@@ -55,8 +65,13 @@ def wifi_scan(band: str = "") -> dict:
             continue
         bssid_m = re.match(r"BSSID \d+\s*:\s*(.*)$", line)
         if bssid_m:
-            curb = {"bssid": bssid_m.group(1).strip(), "signal": "",
-                    "radio": "", "band": "", "channel": ""}
+            curb = {
+                "bssid": bssid_m.group(1).strip(),
+                "signal": "",
+                "radio": "",
+                "band": "",
+                "channel": "",
+            }
             cur["bssids"].append(curb)
             continue
         if curb is None:  # SSID-level fields (before the first BSSID)
@@ -76,8 +91,7 @@ def wifi_scan(band: str = "") -> dict:
 
     if band:
         want = "2.4" if band.strip().startswith("2") else "5"
-        networks = [n for n in networks
-                    if any(want in b["band"] for b in n["bssids"])]
+        networks = [n for n in networks if any(want in b["band"] for b in n["bssids"])]
 
     def _sig(n: dict) -> int:
         vals = [int(re.sub(r"\D", "", b["signal"]) or 0) for b in n["bssids"]]
@@ -92,7 +106,12 @@ def wifi_scan(band: str = "") -> dict:
         "access_points": sum(len(n["bssids"]) for n in networks),
         "open_networks": open_nets,
         "networks": networks,
-        "note": ("Managed-mode survey (no monitor mode). "
-                 + ("Open (unencrypted) networks present: " + ", ".join(open_nets)
-                    if open_nets else "No open networks seen.")),
+        "note": (
+            "Managed-mode survey (no monitor mode). "
+            + (
+                "Open (unencrypted) networks present: " + ", ".join(open_nets)
+                if open_nets
+                else "No open networks seen."
+            )
+        ),
     }

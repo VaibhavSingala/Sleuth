@@ -19,10 +19,16 @@ def check_xss_reflection(url: str, payload: str = "<script>alert(1)</script>") -
         overall `vulnerable` flag, or an {"error": ...} dict.
     """
     if os.environ.get("SLEUTH_ALLOW_ACTIVE_SKILLS", "").strip().lower() not in (
-        "1", "true", "yes", "on",
+        "1",
+        "true",
+        "yes",
+        "on",
     ):
-        return {"ok": False, "error": "Skill 'check_xss_reflection' is disabled. "
-                "Set SLEUTH_ALLOW_ACTIVE_SKILLS=true for authorised targets only."}
+        return {
+            "ok": False,
+            "error": "Skill 'check_xss_reflection' is disabled. "
+            "Set SLEUTH_ALLOW_ACTIVE_SKILLS=true for authorised targets only.",
+        }
 
     params = ["q", "search", "s", "query", "name", "id", "message", "comment"]
     reflected: list[dict] = []
@@ -45,7 +51,7 @@ def check_xss_reflection(url: str, payload: str = "<script>alert(1)</script>") -
         "vulnerable": bool(reflected),
         "note": (
             "Payload appears unescaped in the response; confirm execution in a browser."
-            if reflected else
-            "No reflection on the tested parameters; try other injection points or params."
+            if reflected
+            else "No reflection on the tested parameters; try other injection points or params."
         ),
     }
